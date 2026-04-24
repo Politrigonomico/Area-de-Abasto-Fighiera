@@ -1,0 +1,9 @@
+﻿*.db
+*.sqlite3
+backups/
+build/
+dist/
+*.exe
+__pycache__/
+venv/
+instalador/

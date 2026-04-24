@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Sistema de Abasto{% endblock %}
+{% block topbar_title %}Dashboard{% endblock %}
+
+{% block content %}
+<div id="alert-global" class="alert" style="display:none"></div>
+
+<div class="metrics-grid" id="metrics-grid">
+  <div class="metric-card"><div class="metric-label">Cargando...</div></div>
+</div>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:4px">
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Deudores activos</span>
+      <a href="/reportes/mensual" class="btn btn-sm">Ver informe</a>
+    </div>
+    <div id="tabla-deudores"><p style="color:#aaa;font-size:13px">Cargando...</p></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Abastecedores por categoría</span>
+    </div>
+    <div id="tabla-categorias"><p style="color:#aaa;font-size:13px">Cargando...</p></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const hoy = new Date();
+const periodo = hoy.getFullYear() + '-' + String(hoy.getMonth()+1).padStart(2,'0');
+
+async function cargarDashboard() {
+  const [abastecedores, categorias] = await Promise.all([
+    apiFetch('/abastecedores/?estado=activo'),
+    apiFetch('/categorias/'),
+  ]);
+
+  // Traer saldos en paralelo — todos a la vez en lugar de uno por uno
+  const detalles = await Promise.all(
+    abastecedores.map(ab => apiFetch(`/abastecedores/${ab.id}`))
+  );
+
+  const deudores = detalles.filter(d => d.saldo > 0);
+  const alDia    = detalles.filter(d => d.saldo <= 0);
+
+  document.getElementById('metrics-grid').innerHTML = `
+    <div class="metric-card">
+      <div class="metric-label">Abastecedores activos</div>
+      <div class="metric-value">${abastecedores.length}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Al día</div>
+      <div class="metric-value success">${alDia.length}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Con deuda</div>
+      <div class="metric-value ${deudores.length > 0 ? 'danger' : 'success'}">${deudores.length}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Período actual</div>
+      <div class="metric-value" style="font-size:18px">${periodo}</div>
+    </div>`;
+
+  // Tabla deudores
+  const tablaDeudores = document.getElementById('tabla-deudores');
+  if (!deudores.length) {
+    tablaDeudores.innerHTML = '<p style="color:#aaa;font-size:13px;padding:8px 0">Sin deudores activos</p>';
+  } else {
+    const deudoresOrdenados = deudores.sort((a,b) => b.meses_adeudados - a.meses_adeudados);
+    tablaDeudores.innerHTML = `
+      <table>
+        <thead><tr>
+          <th>Abastecedor</th>
+          <th style="text-align:center">Cat.</th>
+          <th style="text-align:right">Meses</th>
+          <th style="text-align:right">Saldo</th>
+        </tr></thead>
+        <tbody>${deudoresOrdenados.map(d => {
+          const ab  = abastecedores.find(a => a.id === d.id);
+          const cat = categorias.find(c => (d.categoria_ids || []).includes(c.id));
+          return `<tr>
+            <td><a href="/abastecedores/${d.id}/detalle" style="color:inherit;text-decoration:none">${d.razon_social}</a></td>
+            <td style="text-align:center">${(d.categoria_ids||[]).map(cid=>{const c=categorias.find(x=>x.id===cid);return c?`<span class="badge badge-${c.codigo.toLowerCase()}">${c.codigo}</span>`:''}).join(' ')}</td>
+            <td style="text-align:right"><span class="badge badge-deudor">${d.meses_adeudados}</span></td>
+            <td style="text-align:right;color:#dc3545;font-weight:500">$${d.saldo.toLocaleString('es-AR')}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>`;
+  }
+
+  // Tabla categorías
+  document.getElementById('tabla-categorias').innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Categoría</th>
+        <th style="text-align:center">Módulos</th>
+        <th style="text-align:right">Abastecedores</th>
+      </tr></thead>
+      <tbody>${categorias.map(c => `
+        <tr>
+          <td><span class="badge badge-${c.codigo.toLowerCase()}">${c.codigo}</span> ${c.nombre}</td>
+          <td style="text-align:center">${c.modulos}</td>
+          <td style="text-align:right">${abastecedores.filter(a => a.categoria_id === c.id).length}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+cargarDashboard();
+</script>
+{% endblock %}

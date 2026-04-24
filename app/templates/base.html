@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Sistema de Abasto{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<div class="layout">
+
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+        <img src="/static/img/logo.png" style="width:38px;height:38px;object-fit:contain;flex-shrink:0">
+        <div>
+          <div style="font-size:18px;font-weight:600;color:#fff;line-height:1.2">Sistema de Abasto</div>
+          <div style="font-size:14px;color:#4d7deb;margin-top:1px">Comuna de Fighiera</div>
+        </div>
+      </div>
+    </div>
+    <nav>
+      <div class="nav-section">Pagina Principal - Area de Abasto</div>
+      <a href="/" class="nav-link {% if active == 'dashboard' %}active{% endif %}">
+        <span class="nav-icon">▦</span> Pagina Principal
+      </a>
+
+      <div class="nav-section">Gestión</div>
+      <a href="/abastecedores" class="nav-link {% if active == 'abastecedores' %}active{% endif %}">
+        <span class="nav-icon">◉</span> Abastecedores
+      </a>
+      <a href="/categorias-page" class="nav-link {% if active == 'categorias' %}active{% endif %}">
+        <span class="nav-icon">◈</span> Categorías
+      </a>
+
+      <div class="nav-section">Finanzas</div>
+      <a href="/reportes/mensual" class="nav-link {% if active == 'reportes' %}active{% endif %}">
+        <span class="nav-icon">◎</span> Informe mensual
+      </a>
+
+      <div class="nav-section">Configuración</div>
+      <a href="/parametros" class="nav-link {% if active == 'parametros' %}active{% endif %}">
+        <span class="nav-icon">◐</span> Valor del módulo
+      </a>
+    </nav>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-title">{% block topbar_title %}{% endblock %}</div>
+      <div class="topbar-actions">{% block topbar_actions %}{% endblock %}</div>
+    </div>
+    <div class="content">
+      {% block content %}{% endblock %}
+    </div>
+  </div>
+
+</div>
+
+<script>
+async function apiFetch(url, options = {}) {
+  const res = await fetch(url, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Error desconocido' }));
+    throw new Error(err.detail || 'Error en la solicitud');
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+function showAlert(msg, type = 'success') {
+  const el = document.getElementById('alert-global');
+  if (!el) return;
+  el.className = `alert alert-${type}`;
+  el.textContent = msg;
+  el.style.display = 'block';
+  setTimeout(() => el.style.display = 'none', 4000);
+}
+</script>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

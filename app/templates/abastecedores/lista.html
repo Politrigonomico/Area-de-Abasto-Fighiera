@@ -1,0 +1,331 @@
+{% extends "base.html" %}
+{% block title %}Abastecedores{% endblock %}
+{% block topbar_title %}Abastecedores{% endblock %}
+{% block topbar_actions %}
+  <button class="btn btn-primary" onclick="abrirModalNuevo()">+ Nuevo abastecedor</button>
+{% endblock %}
+
+{% block content %}
+<div id="alert-global" class="alert" style="display:none"></div>
+
+<div class="card">
+  <div class="search-bar">
+    <input type="text" id="buscador" placeholder="Buscar por razón social, titular o patente..." oninput="filtrar()">
+    <select id="filtro-categoria" onchange="filtrar()" style="padding:7px 10px;border:1px solid #ddd;border-radius:7px;font-size:13px">
+      <option value="">Todas las categorías</option>
+    </select>
+    <select id="filtro-estado" onchange="filtrar()" style="padding:7px 10px;border:1px solid #ddd;border-radius:7px;font-size:13px">
+      <option value="activo">Activos</option>
+      <option value="">Todos</option>
+      <option value="baja">Baja</option>
+    </select>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Razón social</th>
+          <th>Titular</th>
+          <th>Categoría</th>
+          <th>Teléfono</th>
+          <th>Patente</th>
+          <th style="text-align:center">Estado</th>
+          <th style="text-align:right">Acciones</th>
+        </tr>
+      </thead>
+      <tbody id="tabla-body">
+        <tr><td colspan="7" style="text-align:center;color:#aaa;padding:24px">Cargando...</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div id="tabla-footer" style="font-size:12px;color:#aaa;margin-top:10px"></div>
+</div>
+
+<!-- Modal nuevo/editar abastecedor -->
+<div class="modal-overlay" id="modal-abastecedor">
+  <div class="modal" style="width:640px">
+    <div class="modal-title" id="modal-titulo">Nuevo abastecedor</div>
+
+    <div class="section-label">Datos comerciales</div>
+    <div class="form-grid form-grid-2">
+      <div class="field"><label>Razón social *</label><input id="f-razon" placeholder="Ej: Distribuidora El Nahuel SRL"></div>
+      <div class="field"><label>Titular *</label><input id="f-titular" placeholder="Ej: Gasparini, Hernán"></div>
+      <div class="field"><label>CUIT</label><input id="f-cuit" placeholder="XX-XXXXXXXX-X"></div>
+      <div class="field"><label>Estado inicial</label>
+        <select id="f-estado-inicial">
+          <option value="activo">Activo</option>
+          <option value="baja">Baja</option>
+        </select>
+      </div>
+      <div class="field" style="grid-column:1/-1">
+        <label>Categorías * (seleccioná una o más)</label>
+        <div style="position:relative">
+          <button type="button" id="btn-cats" onclick="toggleDropdownCats()"
+            style="width:100%;text-align:left;padding:7px 10px;border:1px solid #ddd;border-radius:7px;font-size:13px;background:#fff;color:#333;cursor:pointer;display:flex;justify-content:space-between;align-items:center">
+            <span id="btn-cats-label">Seleccioná categorías...</span>
+            <span>▾</span>
+          </button>
+          <div id="dropdown-cats"
+            style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;box-shadow:0 4px 12px rgba(0,0,0,.1);z-index:50;max-height:220px;overflow-y:auto;margin-top:4px">
+            <div id="f-categorias" style="padding:6px"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label">Contacto</div>
+    <div class="form-grid form-grid-2">
+      <div class="field"><label>Teléfono principal</label><input id="f-tel1" placeholder="341 XXXXXXX"></div>
+      <div class="field"><label>Teléfono alternativo</label><input id="f-tel2" placeholder="Opcional"></div>
+      <div class="field" style="grid-column:1/-1"><label>Email</label><input id="f-email" type="email" placeholder="correo@ejemplo.com"></div>
+    </div>
+
+    <div class="section-label">Domicilio</div>
+    <div class="form-grid form-grid-2">
+      <div class="field" style="grid-column:1/-1"><label>Domicilio</label><input id="f-domicilio" placeholder="Calle y número"></div>
+      <div class="field"><label>Localidad</label><input id="f-localidad" placeholder="Rosario"></div>
+      <div class="field"><label>Provincia</label><input id="f-provincia" value="Santa Fe"></div>
+    </div>
+
+    <div class="section-label">Vehículo de ingreso</div>
+    <div class="form-grid form-grid-2">
+      <div class="field"><label>Patente</label><input id="f-patente" placeholder="AB 123 CD" style="text-transform:uppercase;font-family:monospace;letter-spacing:.08em"></div>
+      <div class="field"><label>Descripción del vehículo</label><input id="f-vehiculo" placeholder="Ej: Camión Iveco Daily"></div>
+      <div class="field" style="grid-column:1/-1"><label>Observaciones</label><textarea id="f-obs" placeholder="Días de ingreso, notas, etc."></textarea></div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn" onclick="cerrarModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="guardar()">Guardar</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let categorias = [];
+let abastecedores = [];
+let editandoId = null;
+
+async function cargar() {
+  categorias = await apiFetch('/categorias/');
+
+  // Filtro de categorías en la barra de búsqueda
+  const sel = document.getElementById('filtro-categoria');
+  sel.innerHTML = '<option value="">Todas las categorías</option>' +
+    categorias.map(c => `<option value="${c.id}">${c.codigo} — ${c.nombre}</option>`).join('');
+
+  // Checkboxes en el formulario
+  const divCats = document.getElementById('f-categorias');
+  divCats.innerHTML = categorias.map(c => `
+    <label style="display:flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid #ddd;border-radius:7px;cursor:pointer;font-size:13px">
+      <input type="checkbox" class="check-cat-form" value="${c.id}"
+        style="width:15px;height:15px;accent-color:#6c63ff">
+      <span class="badge badge-${c.codigo.toLowerCase()}">${c.codigo}</span> ${c.nombre}
+      <span style="color:#aaa;font-size:11px">(${c.modulos} mód.)</span>
+    </label>`).join('');
+
+  await filtrar();
+}
+
+async function filtrar() {
+  const buscar = document.getElementById('buscador').value;
+  const catId  = document.getElementById('filtro-categoria').value;
+  const estado = document.getElementById('filtro-estado').value;
+  let url = '/abastecedores/?';
+  if (buscar) url += `buscar=${encodeURIComponent(buscar)}&`;
+  if (catId)  url += `categoria_id=${catId}&`;
+  if (estado) url += `estado=${estado}&`;
+  abastecedores = await apiFetch(url);
+  renderTabla();
+}
+
+function renderTabla() {
+  const tbody = document.getElementById('tabla-body');
+  if (!abastecedores.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#aaa;padding:24px">Sin resultados</td></tr>';
+    document.getElementById('tabla-footer').textContent = '';
+    return;
+  }
+  tbody.innerHTML = abastecedores.map(a => {
+    const cats_ab = (a.categoria_ids || []).map(cid => {
+      const c = categorias.find(x => x.id === cid);
+      return c ? `<span class="badge badge-${c.codigo.toLowerCase()}">${c.codigo}</span>` : '';
+    }).join(' ');
+
+    return `<tr>
+      <td><a href="/abastecedores/${a.id}/detalle" style="color:inherit;text-decoration:none;font-weight:500">${a.razon_social}</a></td>
+      <td>${a.titular}</td>
+      <td>${cats_ab || '—'}</td>
+      <td>${a.telefono_principal || '—'}</td>
+      <td>${a.patente ? `<span class="patente-display" style="font-size:12px;padding:2px 8px">${a.patente}</span>` : '—'}</td>
+      <td style="text-align:center"><span class="badge badge-${a.estado}">${a.estado}</span></td>
+      <td style="text-align:right;white-space:nowrap">
+        <a href="/abastecedores/${a.id}/detalle" class="btn btn-sm">Ver cuenta</a>
+        <button class="btn btn-sm" onclick="editar(${a.id})" style="margin-left:4px">Editar</button>
+        ${a.estado === 'activo'
+          ? `<button class="btn btn-sm btn-danger" onclick="cambiarEstado(${a.id},'${a.razon_social}','baja')" style="margin-left:4px">Dar de baja</button>`
+          : `<button class="btn btn-sm" onclick="cambiarEstado(${a.id},'${a.razon_social}','activo')" style="margin-left:4px;background:#198754;color:#fff">Reactivar</button>`
+        }
+      </td>
+    </tr>`;
+  }).join('');
+  document.getElementById('tabla-footer').textContent = `${abastecedores.length} abastecedor${abastecedores.length !== 1 ? 'es' : ''}`;
+}
+
+// Checkboxes en el dropdown del formulario
+  const divCats = document.getElementById('f-categorias');
+  divCats.innerHTML = categorias.map(c => `
+    <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:13px;transition:background .1s"
+      onmouseover="this.style.background='#f5f5f0'" onmouseout="this.style.background=''">
+      <input type="checkbox" class="check-cat-form" value="${c.id}"
+        onchange="actualizarLabelCats()"
+        style="width:15px;height:15px;accent-color:#6c63ff;flex-shrink:0">
+      <span class="badge badge-${c.codigo.toLowerCase()}">${c.codigo}</span>
+      <span>${c.nombre}</span>
+      <span style="color:#aaa;font-size:11px;margin-left:auto">${c.modulos} mód.</span>
+    </label>`).join('');
+
+function toggleDropdownCats() {
+  const dd = document.getElementById('dropdown-cats');
+  dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+}
+
+function actualizarLabelCats() {
+  const checks = document.querySelectorAll('.check-cat-form:checked');
+  const btn    = document.getElementById('btn-cats-label');
+  if (!checks.length) {
+    btn.textContent = 'Seleccioná categorías...';
+    btn.style.color = '#aaa';
+    return;
+  }
+  const labels = Array.from(checks).map(cb => {
+    const cat = categorias.find(c => c.id === parseInt(cb.value));
+    return cat ? cat.codigo : '';
+  });
+  btn.textContent = labels.join(', ');
+  btn.style.color = '#333';
+}
+
+// Cerrar el dropdown al hacer click fuera
+document.addEventListener('click', function(e) {
+  const dd  = document.getElementById('dropdown-cats');
+  const btn = document.getElementById('btn-cats');
+  if (dd && btn && !dd.contains(e.target) && !btn.contains(e.target)) {
+    dd.style.display = 'none';
+  }
+});
+
+function abrirModalNuevo() {
+  editandoId = null;
+  document.getElementById('modal-titulo').textContent = 'Nuevo abastecedor';
+  ['f-razon','f-titular','f-cuit','f-tel1','f-tel2','f-email',
+   'f-domicilio','f-localidad','f-patente','f-vehiculo','f-obs'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('f-provincia').value = 'Santa Fe';
+  // Desmarcar todos los checkboxes
+  document.querySelectorAll('.check-cat-form').forEach(cb => cb.checked = false);
+  document.getElementById('modal-abastecedor').classList.add('open');
+  actualizarLabelCats();
+  document.getElementById('dropdown-cats').style.display = 'none';
+  document.getElementById('f-estado-inicial').value = 'activo';
+}
+
+async function editar(id) {
+  editandoId = id;
+  const ab = await apiFetch(`/abastecedores/${id}`);
+  document.getElementById('modal-titulo').textContent = 'Editar abastecedor';
+  document.getElementById('f-razon').value     = ab.razon_social || '';
+  document.getElementById('f-titular').value   = ab.titular || '';
+  document.getElementById('f-cuit').value      = ab.cuit || '';
+  document.getElementById('f-tel1').value      = ab.telefono_principal || '';
+  document.getElementById('f-tel2').value      = ab.telefono_alternativo || '';
+  document.getElementById('f-email').value     = ab.email || '';
+  document.getElementById('f-domicilio').value = ab.domicilio || '';
+  document.getElementById('f-localidad').value = ab.localidad || '';
+  document.getElementById('f-provincia').value = ab.provincia || 'Santa Fe';
+  document.getElementById('f-patente').value   = ab.patente || '';
+  document.getElementById('f-vehiculo').value  = ab.descripcion_vehiculo || '';
+  document.getElementById('f-obs').value       = ab.observaciones || '';
+  // Marcar checkboxes según categoria_ids
+  document.querySelectorAll('.check-cat-form').forEach(cb => {
+    cb.checked = (ab.categoria_ids || []).includes(parseInt(cb.value));
+  });
+  document.getElementById('modal-abastecedor').classList.add('open');
+  actualizarLabelCats();
+  document.getElementById('dropdown-cats').style.display = 'none';
+}
+
+async function guardar() {
+  const catIds = Array.from(document.querySelectorAll('.check-cat-form:checked'))
+                      .map(c => parseInt(c.value));
+  if (!catIds.length) {
+    showAlert('Seleccioná al menos una categoría', 'danger'); return;
+  }
+
+  
+  const datos = {
+    razon_social:          document.getElementById('f-razon').value.trim(),
+    titular:               document.getElementById('f-titular').value.trim(),
+    cuit:                  document.getElementById('f-cuit').value.trim() || null,
+    telefono_principal:    document.getElementById('f-tel1').value.trim() || null,
+    telefono_alternativo:  document.getElementById('f-tel2').value.trim() || null,
+    email:                 document.getElementById('f-email').value.trim() || null,
+    domicilio:             document.getElementById('f-domicilio').value.trim() || null,
+    localidad:             document.getElementById('f-localidad').value.trim() || null,
+    provincia:             document.getElementById('f-provincia').value.trim() || 'Santa Fe',
+    patente:               document.getElementById('f-patente').value.trim() || null,
+    descripcion_vehiculo:  document.getElementById('f-vehiculo').value.trim() || null,
+    observaciones:         document.getElementById('f-obs').value.trim() || null,
+    categoria_ids:         catIds,
+    estado: editandoId ? undefined : document.getElementById('f-estado-inicial').value,
+  };
+
+  if (!datos.razon_social || !datos.titular) {
+    showAlert('Razón social y titular son obligatorios', 'danger'); return;
+  }
+
+  try {
+    if (editandoId) {
+      await apiFetch(`/abastecedores/${editandoId}`, { method:'PUT', body: JSON.stringify(datos) });
+      showAlert('Abastecedor actualizado correctamente');
+    } else {
+      await apiFetch('/abastecedores/', { method:'POST', body: JSON.stringify(datos) });
+      showAlert('Abastecedor creado correctamente');
+    }
+    cerrarModal();
+    filtrar();
+  } catch(e) {
+    showAlert(e.message, 'danger');
+  }
+}
+
+
+async function cambiarEstado(id, nombre, nuevoEstado) {
+  const accion = nuevoEstado === 'baja' ? 'dar de baja' : 'reactivar';
+  if (!confirm(`¿Confirmar ${accion} a "${nombre}"?`)) return;
+  try {
+    await apiFetch(`/abastecedores/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ estado: nuevoEstado })
+    });
+    showAlert(`Abastecedor ${nuevoEstado === 'baja' ? 'dado de baja' : 'reactivado'} correctamente`);
+    filtrar();
+  } catch(e) {
+    showAlert(e.message, 'danger');
+  }
+}
+
+
+function cerrarModal() {
+  document.getElementById('modal-abastecedor').classList.remove('open');
+}
+
+
+
+cargar();
+</script>
+{% endblock %}

@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Recibo — Sistema de Abasto</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #f5f5f0; }
+
+    .page {
+      width: 210mm;
+      min-height: 148mm;
+      margin: 20px auto;
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .recibo-header {
+      background: #1a1a2e;
+      color: #fff;
+      padding: 20px 28px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .recibo-header h1 { font-size: 18px; font-weight: 500; }
+    .recibo-header .sub { font-size: 12px; color: #aaa; margin-top: 2px; }
+    .recibo-num { text-align: right; }
+    .recibo-num .num { font-size: 22px; font-weight: 600; letter-spacing: .05em; }
+    .recibo-num .lbl { font-size: 11px; color: #aaa; }
+
+    .recibo-body { padding: 24px 28px; }
+
+    .recibo-section { margin-bottom: 20px; }
+    .recibo-section-title {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: #aaa;
+      margin-bottom: 8px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid #f0f0ec;
+    }
+
+    .datos-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .dato label { font-size: 11px; color: #888; display: block; margin-bottom: 2px; }
+    .dato span  { font-size: 14px; }
+
+    .periodos-table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+    .periodos-table th {
+      font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+      color: #888; text-align: left; padding: 6px 10px;
+      background: #fafaf7; border-bottom: 1px solid #eee;
+    }
+    .periodos-table td { padding: 8px 10px; font-size: 14px; border-bottom: 1px solid #f5f5f0; }
+
+    .total-row {
+      background: #1a1a2e;
+      color: #fff;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 28px;
+      margin-top: 4px;
+    }
+    .total-row .lbl { font-size: 13px; }
+    .total-row .val { font-size: 24px; font-weight: 600; }
+
+    .recibo-footer {
+      padding: 16px 28px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      border-top: 1px solid #f0f0ec;
+      font-size: 12px;
+      color: #aaa;
+    }
+
+    .firma-box {
+      border-top: 1px solid #333;
+      width: 160px;
+      text-align: center;
+      padding-top: 4px;
+      font-size: 11px;
+      color: #555;
+    }
+
+    .btn-print {
+      display: block;
+      width: 210mm;
+      margin: 12px auto;
+      padding: 10px;
+      background: #1a1a2e;
+      color: #fff;
+      border: none;
+      border-radius: 7px;
+      font-size: 14px;
+      cursor: pointer;
+      text-align: center;
+    }
+
+    @media print {
+      body { background: #fff; }
+      .btn-print { display: none; }
+      .page { margin: 0; border: none; border-radius: 0; box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+
+<button class="btn-print" onclick="window.print()">Imprimir recibo</button>
+
+<div class="page" id="recibo-content">
+  <div class="recibo-header">
+    <div>
+      <h1>Comuna de Fighiera</h1>
+      <div class="sub">Área de Abasto — Comprobante de pago</div>
+    </div>
+    <div class="recibo-num">
+      <div class="lbl">Recibo N°</div>
+      <div class="num" id="r-numero">—</div>
+    </div>
+  </div>
+
+  <div class="recibo-body">
+    <div class="recibo-section">
+      <div class="recibo-section-title">Datos del abastecedor</div>
+      <div class="datos-grid">
+        <div class="dato"><label>Razón social</label><span id="r-razon"></span></div>
+        <div class="dato"><label>Titular</label><span id="r-titular"></span></div>
+        <div class="dato"><label>CUIT</label><span id="r-cuit"></span></div>
+        <div class="dato"><label>Categoría</label><span id="r-categoria"></span></div>
+      </div>
+    </div>
+
+    <div class="recibo-section">
+      <div class="recibo-section-title">Períodos cancelados</div>
+      <table class="periodos-table">
+        <thead>
+          <tr>
+            <th>Período</th>
+            <th>Concepto</th>
+            <th style="text-align:right">Módulos</th>
+            <th style="text-align:right">Valor módulo</th>
+            <th style="text-align:right">Importe</th>
+          </tr>
+        </thead>
+        <tbody id="r-periodos"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="total-row">
+    <span class="lbl">Total abonado</span>
+    <span class="val" id="r-total"></span>
+  </div>
+
+  <div class="recibo-footer">
+    <div>
+      <div>Fecha de pago: <strong id="r-fecha"></strong></div>
+      <div style="margin-top:4px">Generado el: <strong id="r-generado"></strong></div>
+    </div>
+    <div class="firma-box">Firma y sello</div>
+  </div>
+</div>
+
+<script>
+async function cargarRecibo() {
+  const params = new URLSearchParams(window.location.search);
+  const pagoId = params.get('pago_id');
+  if (!pagoId) { document.body.innerHTML = '<p style="padding:40px;color:red">Recibo no encontrado</p>'; return; }
+
+  const data = await fetch(`/recibo/datos/${pagoId}`).then(r => r.json());
+
+  document.getElementById('r-numero').textContent    = data.comprobante || pagoId;
+  document.getElementById('r-razon').textContent     = data.razon_social;
+  document.getElementById('r-titular').textContent   = data.titular;
+  document.getElementById('r-cuit').textContent      = data.cuit || '—';
+  document.getElementById('r-categoria').textContent = data.categoria;
+  document.getElementById('r-fecha').textContent     = new Date(data.fecha).toLocaleDateString('es-AR');
+  document.getElementById('r-generado').textContent  = new Date().toLocaleDateString('es-AR');
+  document.getElementById('r-total').textContent     = '$' + data.total.toLocaleString('es-AR');
+
+  document.getElementById('r-periodos').innerHTML = data.periodos.map(p => `
+    <tr>
+      <td style="font-family:monospace">${p.periodo}</td>
+      <td>${p.descripcion}</td>
+      <td style="text-align:right">${p.modulos}</td>
+      <td style="text-align:right">$${p.valor_modulo.toLocaleString('es-AR')}</td>
+      <td style="text-align:right;font-weight:500">$${p.importe.toLocaleString('es-AR')}</td>
+    </tr>`).join('');
+}
+cargarRecibo();
+</script>
+</body>
+</html>

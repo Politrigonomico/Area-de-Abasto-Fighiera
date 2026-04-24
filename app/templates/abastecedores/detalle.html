@@ -1,0 +1,764 @@
+{% extends "base.html" %}
+{% block title %}Detalle abastecedor{% endblock %}
+{% block topbar_title %}<span id="topbar-nombre">Cargando...</span>{% endblock %}
+{% block topbar_actions %}
+  <a href="/abastecedores" class="btn">← Volver</a>
+  <button class="btn" onclick="abrirModalCargoManual()">+ Cargar deuda</button>
+  <button class="btn" onclick="abrirModalPagoHistorico()">+ Cargar pago viejo</button>
+{% endblock %}
+
+{% block content %}
+<div id="alert-global" class="alert" style="display:none"></div>
+
+<div style="display:grid;grid-template-columns:340px 1fr;gap:16px;align-items:start">
+
+  <!-- Ficha -->
+  <div style="display:flex;flex-direction:column;gap:12px">
+    <div class="card">
+      <div class="section-label" style="margin-top:0">Datos comerciales</div>
+      <div style="display:flex;flex-direction:column;gap:10px" id="ficha-comercial"></div>
+    </div>
+    <div class="card">
+      <div class="section-label" style="margin-top:0">Contacto</div>
+      <div style="display:flex;flex-direction:column;gap:10px" id="ficha-contacto"></div>
+    </div>
+    <div class="card">
+      <div class="section-label" style="margin-top:0">Vehículo</div>
+      <div id="ficha-vehiculo"></div>
+    </div>
+  </div>
+
+<!-- Cuenta corriente -->
+<div style="display:flex;flex-direction:column;gap:12px">
+  <div class="metrics-grid" style="grid-template-columns:repeat(3,1fr)" id="metricas-cc"></div>
+
+  <div id="alerta-deuda" style="display:none"></div>
+
+  
+  <div id="panel-pago" style="display:none;background:#fff;border:2px solid #198754;border-radius:10px;padding:16px 20px">
+    <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+      <div style="flex:1">
+        <div style="font-size:12px;color:#888;margin-bottom:2px">Períodos seleccionados</div>
+        <div style="font-size:13px;font-weight:500" id="panel-periodos"></div>
+      </div>
+      <div style="text-align:center">
+        <div style="font-size:12px;color:#888;margin-bottom:2px">Total a cobrar</div>
+        <div style="font-size:22px;font-weight:500;color:#198754" id="panel-total">$0</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <div class="field" style="margin:0">
+          <input type="date" id="p-fecha" style="padding:6px 10px;font-size:13px;border:1px solid #ddd;border-radius:7px">
+        </div>
+        <div class="field" style="margin:0">
+          <input id="p-comprobante" readonly style="padding:6px 10px;font-size:13px;border:1px solid #ddd;border-radius:7px;width:110px;background:#f5f5f5;color:#888;cursor:default">
+        </div>
+        <button class="btn btn-success" onclick="confirmarPago()">Confirmar pago</button>
+        <button class="btn" onclick="deseleccionarTodo()">Cancelar</button>
+      </div>
+    </div>
+  </div>
+  
+  <div class="card">
+    <div class="card-header">
+      <div style="display:flex;gap:8px">
+        <button id="tab-deudas" onclick="setTab('deudas')"
+          style="padding:6px 16px;border-radius:7px;border:1px solid #ddd;font-size:13px;cursor:pointer;background:#1a1a2e;color:#fff">
+          Deudas
+        </button>
+        <button id="tab-pagos" onclick="setTab('pagos')"
+          style="padding:6px 16px;border-radius:7px;border:1px solid #ddd;font-size:13px;cursor:pointer;background:#fff;color:#333">
+          Pagos
+        </button>
+      </div>
+    </div>
+
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Cuenta corriente</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span style="font-size:12px;color:#aaa" id="hint-seleccion">Tildá los cargos para registrar un pago</span>
+          <select id="filtro-anio" onchange="cargarMovimientos()" style="font-size:13px;padding:5px 10px;border:1px solid #ddd;border-radius:7px">
+            <option value="">Todos los años</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+            <thead>
+              <tr>
+                <th style="width:40px"></th>
+                <th>Período</th>
+                <th>Concepto</th>
+                <th style="text-align:right">Debe</th>
+                <th style="text-align:right">Haber</th>
+                <th style="text-align:right">Importe</th>
+                <th style="text-align:center">Tipo</th>
+                <th style="width:40px"></th>
+              </tr>
+            </thead>
+          <tbody id="tabla-cc"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- Modal cargo de deudas -->
+<div class="modal-overlay" id="modal-cargo">
+  <div class="modal" style="width:460px">
+    <div class="modal-title">Cargar deuda</div>
+
+    <!-- Selector de modo -->
+    <div style="display:flex;gap:8px;margin-bottom:20px">
+      <button id="btn-modo-una" onclick="setModo('una')"
+        style="flex:1;padding:10px;border-radius:8px;border:2px solid #6c63ff;background:#6c63ff;color:#fff;font-size:13px;cursor:pointer;font-weight:500">
+        Cargar una deuda
+      </button>
+      <button id="btn-modo-varias" onclick="setModo('varias')"
+        style="flex:1;padding:10px;border-radius:8px;border:2px solid #ddd;background:#fff;color:#333;font-size:13px;cursor:pointer">
+        Cargar varias deudas
+      </button>
+    </div>
+
+    <!-- Modo: una deuda -->
+    <div id="modo-una">
+      <div class="form-grid">
+        <div class="field">
+          <label>Período *</label>
+          <input id="c-periodo" placeholder="YYYY-MM, ej: 2025-03" maxlength="7">
+          <span style="font-size:11px;color:#aaa">Formato: 2025-03 para marzo 2025</span>
+        </div>
+        <div class="field">
+          <label>Descripción</label>
+          <input id="c-descripcion" placeholder="Ej: Deuda sistema anterior">
+        </div>
+      </div>
+    </div>
+
+    <!-- Modo: varias deudas -->
+    <div id="modo-varias" style="display:none">
+      <div class="form-grid form-grid-2">
+        <div class="field">
+          <label>Desde *</label>
+          <input id="c-desde" placeholder="YYYY-MM, ej: 2025-01" maxlength="7" oninput="actualizarPreviewRango()">
+          <span style="font-size:11px;color:#aaa">Mes inicial</span>
+        </div>
+        <div class="field">
+          <label>Hasta *</label>
+          <input id="c-hasta" placeholder="YYYY-MM, ej: 2025-06" maxlength="7" oninput="actualizarPreviewRango()">
+          <span style="font-size:11px;color:#aaa">Mes final (inclusive)</span>
+        </div>
+      </div>
+      <div class="field" style="margin-top:10px">
+        <label>Descripción</label>
+        <input id="c-descripcion-rango" placeholder="Ej: Deuda sistema anterior">
+      </div>
+      <div id="preview-rango" style="display:none;margin-top:12px;background:#f0f4ff;border:1px solid #c7d2fe;border-radius:8px;padding:10px 14px;font-size:13px;color:#3730a3"></div>
+    </div>
+
+    <div id="cargo-aviso" style="display:none;margin-top:12px"></div>
+
+    <div class="modal-footer">
+      <button class="btn" onclick="cerrarModalCargo()">Cancelar</button>
+      <button class="btn btn-primary" id="btn-guardar-cargo" onclick="guardarCargo()">Cargar deuda</button>
+    </div>
+  </div>
+</div>
+
+  <div class="modal-overlay" id="modal-pago-historico">
+    <div class="modal" style="width: 480px;">
+      <div class="modal-title">Cargar pago histórico</div>
+      <p style="font-size:13px;color:#888;margin-bottom:16px">
+        Usá esto para registrar pagos que se hicieron en la ficha de papel
+      </p>
+      <!--Selector de modo-->
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <button id="btn-ph-una" onclick="setModoPago('uno')"
+        style="flex:1;padding:8px;border-radius:8px;border:2px solid #198754;background:#198754;color: #fff;font-size:13px;cursor:pointer;font-weight:500">
+          Cargar un pago
+        </button>
+        <button id="btn-ph-rango" onclick="setModoPago('rango')"
+        style="flex:1;padding:8px;border-radius:8px;border:2px solid #ddd;background:#fff;color: #333;font-size:13px;cursor:pointer">
+          Cargar varios pagos
+        </button>
+      </div>
+      <!-- Modo: un período -->
+      <div id="ph-modo-uno">
+        <div class="form-grid">
+          <div class="field">
+            <label>Período *</label>
+            <input id="ph-periodo" placeholder="YYYY-MM, ej: 2024-03" maxlength="7">
+            <span style="font-size:11px;color:#aaa">Mes que se está pagando</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modo: rango -->
+      <div id="ph-modo-rango" style="display:none">
+        <div class="form-grid form-grid-2">
+          <div class="field">
+            <label>Desde *</label>
+            <input id="ph-desde" placeholder="YYYY-MM, ej: 2024-01" maxlength="7" oninput="actualizarPreviewPago()">
+          </div>
+          <div class="field">
+            <label>Hasta *</label>
+            <input id="ph-hasta" placeholder="YYYY-MM, ej: 2024-06" maxlength="7" oninput="actualizarPreviewPago()">
+          </div>
+        </div>
+        <div id="ph-preview-rango" style="display:none;margin-top:8px;background:#f0fdf4;border:1px solid #86efac;border-radius:7px;padding:10px 14px;font-size:13px;color:#166534"></div>
+      </div>
+
+      <div class="form-grid" style="margin-top:14px">
+        <div class="field">
+          <label>Importe abonado *</label>
+          <input type="number" id="ph-importe" placeholder="Ej: 3000" min="0.01" step="0.01">
+          <span style="font-size:11px;color:#aaa">Ingresá el monto exacto del recibo de papel</span>
+        </div>
+        <div class="form-grid form-grid-2">
+          <div class="field">
+            <label>Fecha del pago *</label>
+            <input type="date" id="ph-fecha">
+          </div>
+          <div class="field">
+            <label>N° de recibo</label>
+            <input id="ph-comprobante" placeholder="Opcional">
+          </div>
+        </div>
+        <div class="field">
+          <label>Descripción adicional</label>
+          <input id="ph-descripcion" placeholder="Opcional">
+        </div>
+      </div>
+
+      <div id="ph-aviso" style="display:none;margin-top:10px"></div>
+
+      <div class="modal-footer">
+        <button class="btn" onclick="cerrarModalPagoHistorico()">Cancelar</button>
+        <button class="btn btn-success" onclick="guardarPagoHistorico()">Registrar pago</button>
+      </div>
+    </div>
+  </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const abastecedorId = {{ abastecedor_id }};
+let datosAb = null;
+let cargosData = [];
+let modoCargoActual = 'una';
+let tabActual = 'deudas';
+let modoPagoHistorico = 'uno';
+
+function setTab(tab) {
+  tabActual = tab;
+  document.getElementById('tab-deudas').style.background  = tab === 'deudas'  ? '#1a1a2e' : '#fff';
+  document.getElementById('tab-deudas').style.color       = tab === 'deudas'  ? '#fff'    : '#333';
+  document.getElementById('tab-pagos').style.background   = tab === 'pagos'   ? '#1a1a2e' : '#fff';
+  document.getElementById('tab-pagos').style.color        = tab === 'pagos'   ? '#fff'    : '#333';
+  renderTabla();
+}
+
+function setModo(modo) {
+  modoCargoActual = modo;
+  document.getElementById('modo-una').style.display      = modo === 'una'    ? 'block' : 'none';
+  document.getElementById('modo-varias').style.display   = modo === 'varias' ? 'block' : 'none';
+  document.getElementById('btn-modo-una').style.background    = modo === 'una'    ? '#6c63ff' : '#fff';
+  document.getElementById('btn-modo-una').style.color         = modo === 'una'    ? '#fff'    : '#333';
+  document.getElementById('btn-modo-una').style.borderColor   = modo === 'una'    ? '#6c63ff' : '#ddd';
+  document.getElementById('btn-modo-varias').style.background = modo === 'varias' ? '#6c63ff' : '#fff';
+  document.getElementById('btn-modo-varias').style.color      = modo === 'varias' ? '#fff'    : '#333';
+  document.getElementById('btn-modo-varias').style.borderColor= modo === 'varias' ? '#6c63ff' : '#ddd';
+  document.getElementById('btn-guardar-cargo').textContent    = modo === 'varias' ? 'Cargar deudas' : 'Cargar deuda';
+  document.getElementById('cargo-aviso').style.display = 'none';
+  document.getElementById('preview-rango').style.display = 'none';
+}
+
+function actualizarPreviewRango() {
+  const desde = document.getElementById('c-desde').value.trim();
+  const hasta = document.getElementById('c-hasta').value.trim();
+  const preview = document.getElementById('preview-rango');
+  if (!desde.match(/^\d{4}-\d{2}$/) || !hasta.match(/^\d{4}-\d{2}$/)) {
+    preview.style.display = 'none'; return;
+  }
+  if (desde > hasta) {
+    preview.style.display = 'block';
+    preview.style.background = '#fff0f0';
+    preview.style.borderColor = '#fca5a5';
+    preview.style.color = '#dc2626';
+    preview.textContent = 'El período "desde" no puede ser mayor al "hasta"';
+    return;
+  }
+  const [ay, am] = desde.split('-').map(Number);
+  const [hy, hm] = hasta.split('-').map(Number);
+  const cantidad = (hy - ay) * 12 + (hm - am) + 1;
+  const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+                 'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  preview.style.display = 'block';
+  preview.style.background = '#f0f4ff';
+  preview.style.borderColor = '#c7d2fe';
+  preview.style.color = '#3730a3';
+  preview.innerHTML = `Se van a cargar <strong>${cantidad} período${cantidad > 1 ? 's' : ''}</strong> — de ${meses[am-1]} ${ay} a ${meses[hm-1]} ${hy}.`;
+}
+
+function fila(label, valor) {
+  return `<div>
+    <div style="font-size:11px;color:#aaa;margin-bottom:1px">${label}</div>
+    <div style="font-size:13px">${valor || '<span style="color:#ccc">—</span>'}</div>
+  </div>`;
+}
+
+async function cargarFicha() {
+  datosAb = await apiFetch(`/abastecedores/${abastecedorId}`);
+  document.getElementById('topbar-nombre').textContent = datosAb.razon_social;
+  const cats = await apiFetch('/categorias/');
+  const cat  = cats.find(c => c.id === datosAb.categoria_id);
+  const codigo = cat ? cat.codigo.toLowerCase() : 'a';
+
+  document.getElementById('ficha-comercial').innerHTML =
+    fila('Razón social', `<strong>${datosAb.razon_social}</strong>`) +
+    fila('Titular', datosAb.titular) +
+    fila('CUIT', datosAb.cuit) +
+    fila('Categoría', (datosAb.categoria_ids || []).map(cid => {
+        const c = cats.find(x => x.id === cid);
+        return c ? `<span class="badge badge-${c.codigo.toLowerCase()}">${c.codigo}</span>` : '';
+    }).join(' - ') || '?') +
+    fila('Estado', `<span class="badge badge-${datosAb.estado}">${datosAb.estado}</span>`);
+
+  document.getElementById('ficha-contacto').innerHTML =
+    fila('Teléfono principal', datosAb.telefono_principal) +
+    fila('Teléfono alternativo', datosAb.telefono_alternativo) +
+    fila('Email', datosAb.email) +
+    fila('Domicilio', datosAb.domicilio) +
+    fila('Localidad / Provincia', [datosAb.localidad, datosAb.provincia].filter(Boolean).join(', '));
+
+  document.getElementById('ficha-vehiculo').innerHTML =
+    (datosAb.patente ? `<div class="patente-display" style="margin-bottom:10px">${datosAb.patente}</div>` : '') +
+    fila('Descripción', datosAb.descripcion_vehiculo) +
+    fila('Observaciones', datosAb.observaciones);
+
+  const saldo = datosAb.saldo || 0;
+  const meses = datosAb.meses_adeudados || 0;
+  document.getElementById('metricas-cc').innerHTML = `
+    <div class="metric-card">
+      <div class="metric-label">Saldo deudor</div>
+      <div class="metric-value ${saldo > 0 ? 'danger' : 'success'}">$${saldo.toLocaleString('es-AR')}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Meses adeudados</div>
+      <div class="metric-value ${meses > 0 ? 'warning' : 'success'}">${meses}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Estado de cuenta</div>
+      <div class="metric-value" style="font-size:16px;margin-top:4px">
+        <span class="badge ${saldo > 0 ? 'badge-deudor' : 'badge-al-dia'}" style="font-size:13px;padding:4px 12px">
+          ${saldo > 0 ? 'Con deuda' : 'Al día'}
+        </span>
+      </div>
+    </div>`;
+
+  if (meses > 0 && datosAb.periodos_deudores) {
+    const alertDiv = document.getElementById('alerta-deuda');
+    alertDiv.className = 'alert alert-warning';
+    alertDiv.innerHTML = `Adeuda los períodos: <strong>${datosAb.periodos_deudores.join(', ')}</strong>`;
+    alertDiv.style.display = 'block';
+  } else {
+    document.getElementById('alerta-deuda').style.display = 'none';
+  }
+}
+
+async function cargarMovimientos() {
+  const data = await apiFetch(`/transacciones/abastecedor/${abastecedorId}`);
+  cargosData = data.movimientos;
+
+  const anios = [...new Set(cargosData.map(m => m.periodo?.substring(0,4)).filter(Boolean))].sort().reverse();
+  const sel = document.getElementById('filtro-anio');
+  const valorActual = sel.value;
+  sel.innerHTML = '<option value="">Todos los años</option>' +
+    anios.map(a => `<option value="${a}" ${a == valorActual ? 'selected':''}>${a}</option>`).join('');
+
+  const hoy = new Date().toISOString().split('T')[0];
+  document.getElementById('p-fecha').value = hoy;
+
+  renderTabla();
+}
+
+function renderTabla() {
+  const filtroAnio = document.getElementById('filtro-anio').value;
+  const filtrados = filtroAnio ? cargosData.filter(m => m.periodo?.startsWith(filtroAnio)) : cargosData;
+  const tbody = document.getElementById('tabla-cc');
+  const thead = document.querySelector('table thead tr');
+
+  if (tabActual === 'deudas') {
+    // 1. Ajustamos el encabezado para Deudas (6 columnas reales)
+    thead.innerHTML = `
+      <th style="width:40px"></th>
+      <th>Período</th>
+      <th>Concepto</th>
+      <th style="text-align:right">Importe</th>
+      <th style="text-align:center">Estado</th>
+      <th style="width:40px"></th>`;
+
+    const cargos = filtrados.filter(m => m.tipo === 'cargo' && m.pagado === false);
+    if (!cargos.length) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#aaa;padding:20px">Sin deudas pendientes</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = cargos.map(m => `
+      <tr style="cursor:pointer" onclick="toggleCheck(this)">
+        <td style="text-align:center">
+          <input type="checkbox" class="check-cargo" value="${m.id}" 
+            data-importe="${m.importe}" data-periodo="${m.periodo}" 
+            onchange="actualizarPanel()" onclick="event.stopPropagation()">
+        </td>
+        <td style="font-family:monospace;font-size:12px">${m.periodo || '—'}</td>
+        <td>${m.descripcion || 'Cargo mensual'}</td>
+        <td style="text-align:right;color:#dc3545;font-weight:500">$${m.importe.toLocaleString('es-AR')}</td>
+        <td style="text-align:center"><span class="badge badge-deudor">pendiente</span></td>
+        <td style="text-align:center">
+          <button onclick="event.stopPropagation(); eliminarCargo(${m.id}, '${m.periodo}')"
+            style="background:transparent;border:none;cursor:pointer;color:#dc3545;font-size:16px">✕</button>
+        </td>
+      </tr>`).join('');
+
+  } else {
+    // 2. Ajustamos el encabezado para Pagos (5 columnas reales)
+    thead.innerHTML = `
+      <th>Fecha / Período</th>
+      <th>Concepto / Recibo</th>
+      <th style="text-align:right">Importe Pagado</th>
+      <th style="text-align:center">Estado</th>
+      <th style="width:40px"></th>`;
+
+    const pagos = filtrados.filter(m => m.tipo === 'pago');
+    if (!pagos.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#aaa;padding:20px">Sin pagos registrados</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = pagos.map(m => `
+      <tr style="background:#f8fff8">
+        <td style="font-family:monospace;font-size:12px">${m.periodo || '—'}</td>
+        <td>
+          ${m.descripcion || 'Pago recibido'} 
+          ${m.comprobante ? `<br><small style="color:#888">Recibo: #${m.comprobante}</small>` : ''}
+        </td>
+        <td style="text-align:right;color:#198754;font-weight:600">$${m.importe.toLocaleString('es-AR')}</td>
+        <td style="text-align:center"><span class="badge badge-al-dia">PAGADO</span></td>
+        <td style="text-align:center">
+          <button onclick="event.stopPropagation(); eliminarPago(${m.id})"
+            style="background:transparent;border:none;cursor:pointer;color:#aaa;font-size:16px">✕</button>
+        </td>
+      </tr>`).join('');
+  }
+}
+
+async function eliminarCargo(cargoId, periodo, pagado) {
+  if (!confirm(`¿Eliminar el cargo del período ${periodo}?\n\nEsta acción no se puede deshacer.`)) return;
+  try {
+    await apiFetch(`/transacciones/cargo/${cargoId}`, { method: 'DELETE' });
+    showAlert(`Cargo del período ${periodo} eliminado`);
+    await cargarFicha();
+    await cargarMovimientos();
+  } catch(e) {
+    showAlert(e.message, 'danger');
+  }
+}
+
+async function eliminarPago(pagoId) {
+  const pago = cargosData.find(m => m.id === pagoId);
+  const desc = pago ? pago.descripcion : '';
+  const esHistorico = desc && desc.includes('histórico');
+
+  const advertencia = esHistorico
+    ? `¿Eliminar el pago histórico "${desc}"?\n\nEste registro se eliminará del historial. No afecta ningún cargo pendiente.`
+    : `⚠ Eliminar "${desc}".\n\nLos períodos asociados volverán a estado PENDIENTE.\n\n¿Continuar?`;
+
+  if (!confirm(advertencia)) return;
+  try {
+    const res = await apiFetch(`/transacciones/pago/${pagoId}`, { method: 'DELETE' });
+    showAlert(res.mensaje);
+    await cargarFicha();
+    await cargarMovimientos();
+  } catch(e) {
+    showAlert(e.message, 'danger');
+  }
+}
+
+function toggleCheck(row) {
+  const cb = row.querySelector('.check-cargo');
+  if (cb) { cb.checked = !cb.checked; actualizarPanel(); }
+}
+
+function actualizarPanel() {
+  const checks   = document.querySelectorAll('.check-cargo:checked');
+  const total    = Array.from(checks).reduce((s,c) => s + parseFloat(c.dataset.importe), 0);
+  const periodos = Array.from(checks).map(c => c.dataset.periodo).sort();
+  const panel    = document.getElementById('panel-pago');
+  if (checks.length === 0) { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+  document.getElementById('panel-total').textContent    = '$' + total.toLocaleString('es-AR');
+  document.getElementById('panel-periodos').textContent = periodos.join(', ');
+  // Autocompleta el N° recibo con 000000 si está vacío
+  const campoCbte = document.getElementById('p-comprobante');
+  if (!campoCbte.value) campoCbte.value = '000000';
+}
+
+function deseleccionarTodo() {
+  document.querySelectorAll('.check-cargo').forEach(c => c.checked = false);
+  actualizarPanel();
+}
+
+async function confirmarPago() {
+  const checks   = document.querySelectorAll('.check-cargo:checked');
+  const cargoIds = Array.from(checks).map(c => parseInt(c.value));
+  const fecha    = document.getElementById('p-fecha').value;
+  if (!cargoIds.length) { showAlert('Seleccioná al menos un período', 'danger'); return; }
+  if (!fecha)           { showAlert('La fecha es obligatoria', 'danger'); return; }
+  const periodos = Array.from(checks).map(c => c.dataset.periodo).sort();
+  if (!confirm(`¿Confirmar pago de los períodos ${periodos.join(', ')}?`)) return;
+  try {
+    const res = await apiFetch('/transacciones/pago-selectivo', {
+      method: 'POST',
+      body: JSON.stringify({
+        abastecedor_id: abastecedorId,
+        cargo_ids:      cargoIds,
+        fecha:          fecha,
+        comprobante:    document.getElementById('p-comprobante').value || null,
+      })
+    });
+    showAlert(`✓ Pago registrado — $${res.importe.toLocaleString('es-AR')} — Períodos: ${res.periodos.join(', ')}`);
+    window.open(`/recibo-pdf/triplicado/${res.pago_id}`, '_blank');
+    document.getElementById('panel-pago').style.display = 'none';
+    await cargarFicha();
+    await cargarMovimientos();
+  } catch(e) {
+    showAlert(e.message, 'danger');
+  }
+}
+
+function abrirModalCargoManual() {
+  document.getElementById('c-periodo').value = '';
+  document.getElementById('c-descripcion').value = '';
+  document.getElementById('c-desde').value = '';
+  document.getElementById('c-hasta').value = '';
+  document.getElementById('c-descripcion-rango').value = '';
+  document.getElementById('cargo-aviso').style.display = 'none';
+  document.getElementById('preview-rango').style.display = 'none';
+  setModo('una');
+  document.getElementById('modal-cargo').classList.add('open');
+}
+
+function cerrarModalCargo() {
+  document.getElementById('modal-cargo').classList.remove('open');
+}
+
+async function guardarCargo() {
+  const aviso = document.getElementById('cargo-aviso');
+  aviso.style.display = 'none';
+  if (modoCargoActual === 'una') {
+    const periodo     = document.getElementById('c-periodo').value.trim();
+    const descripcion = document.getElementById('c-descripcion').value.trim();
+    if (!periodo.match(/^\d{4}-\d{2}$/)) {
+      aviso.className = 'alert alert-danger';
+      aviso.textContent = 'El período debe tener el formato YYYY-MM (ej: 2025-03)';
+      aviso.style.display = 'block'; return;
+    }
+    try {
+      const res = await apiFetch('/transacciones/cargo-manual', {
+        method: 'POST',
+        body: JSON.stringify({ abastecedor_id: abastecedorId, periodo, descripcion: descripcion || null })
+      });
+      showAlert(`Deuda cargada — período ${res.periodo} por $${res.importe.toLocaleString('es-AR')}`);
+      cerrarModalCargo();
+      await cargarFicha();
+      await cargarMovimientos();
+    } catch(e) {
+      aviso.className = 'alert alert-danger';
+      aviso.textContent = e.message;
+      aviso.style.display = 'block';
+    }
+  } else {
+    const desde       = document.getElementById('c-desde').value.trim();
+    const hasta       = document.getElementById('c-hasta').value.trim();
+    const descripcion = document.getElementById('c-descripcion-rango').value.trim();
+    if (!desde.match(/^\d{4}-\d{2}$/) || !hasta.match(/^\d{4}-\d{2}$/)) {
+      aviso.className = 'alert alert-danger';
+      aviso.textContent = 'Los períodos deben tener el formato YYYY-MM (ej: 2025-03)';
+      aviso.style.display = 'block'; return;
+    }
+    if (desde > hasta) {
+      aviso.className = 'alert alert-danger';
+      aviso.textContent = 'El período "desde" no puede ser mayor al "hasta"';
+      aviso.style.display = 'block'; return;
+    }
+    try {
+      const res = await apiFetch('/transacciones/cargo-rango', {
+        method: 'POST',
+        body: JSON.stringify({
+          abastecedor_id: abastecedorId,
+          periodo_desde:  desde,
+          periodo_hasta:  hasta,
+          descripcion:    descripcion || null,
+        })
+      });
+      let msg = `${res.total_generados} deudas cargadas por $${res.total_importe.toLocaleString('es-AR')} en total.`;
+      if (res.omitidos.length > 0) {
+        msg += ` Se omitieron ${res.omitidos.length} período(s) que ya existían: ${res.omitidos.join(', ')}`;
+      }
+      showAlert(msg);
+      cerrarModalCargo();
+      await cargarFicha();
+      await cargarMovimientos();
+    } catch(e) {
+      aviso.className = 'alert alert-danger';
+      aviso.textContent = e.message;
+      aviso.style.display = 'block';
+    }
+  }
+}
+
+
+function abrirModalPagoHistorico() {
+  document.getElementById('ph-periodo').value    = '';
+  document.getElementById('ph-desde').value      = '';
+  document.getElementById('ph-hasta').value      = '';
+  document.getElementById('ph-importe').value    = '';
+  document.getElementById('ph-comprobante').value= '';
+  document.getElementById('ph-descripcion').value= '';
+  document.getElementById('ph-aviso').style.display = 'none';
+  document.getElementById('ph-preview-rango').style.display = 'none';
+  const hoy = new Date().toISOString().split('T')[0];
+  document.getElementById('ph-fecha').value = hoy;
+  setModoPago('uno');
+  document.getElementById('modal-pago-historico').classList.add('open');
+}
+
+function cerrarModalPagoHistorico() {
+  document.getElementById('modal-pago-historico').classList.remove('open');
+}
+
+function setModoPago(modo) {
+  modoPagoHistorico = modo;
+  document.getElementById('ph-modo-uno').style.display   = modo === 'uno'   ? 'block' : 'none';
+  document.getElementById('ph-modo-rango').style.display = modo === 'rango' ? 'block' : 'none';
+  document.getElementById('btn-ph-una').style.background    = modo === 'uno'   ? '#198754' : '#fff';
+  document.getElementById('btn-ph-una').style.color         = modo === 'uno'   ? '#fff'    : '#333';
+  document.getElementById('btn-ph-una').style.borderColor   = modo === 'uno'   ? '#198754' : '#ddd';
+  document.getElementById('btn-ph-rango').style.background  = modo === 'rango' ? '#198754' : '#fff';
+  document.getElementById('btn-ph-rango').style.color       = modo === 'rango' ? '#fff'    : '#333';
+  document.getElementById('btn-ph-rango').style.borderColor = modo === 'rango' ? '#198754' : '#ddd';
+  document.getElementById('ph-aviso').style.display = 'none';
+}
+
+function actualizarPreviewPago() {
+  const desde   = document.getElementById('ph-desde').value.trim();
+  const hasta   = document.getElementById('ph-hasta').value.trim();
+  const preview = document.getElementById('ph-preview-rango');
+  if (!desde.match(/^\d{4}-\d{2}$/) || !hasta.match(/^\d{4}-\d{2}$/)) {
+    preview.style.display = 'none'; return;
+  }
+  if (desde > hasta) {
+    preview.style.display = 'block';
+    preview.style.background = '#fff0f0';
+    preview.style.borderColor = '#fca5a5';
+    preview.style.color = '#dc2626';
+    preview.textContent = 'El período "desde" no puede ser mayor al "hasta"';
+    return;
+  }
+  const [ay, am] = desde.split('-').map(Number);
+  const [hy, hm] = hasta.split('-').map(Number);
+  const cantidad = (hy - ay) * 12 + (hm - am) + 1;
+  const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+                 'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  preview.style.display = 'block';
+  preview.style.background = '#f0fdf4';
+  preview.style.borderColor = '#86efac';
+  preview.style.color = '#166534';
+  preview.innerHTML = `Pago que cubre <strong>${cantidad} período${cantidad > 1 ? 's' : ''}</strong> — de ${meses[am-1]} ${ay} a ${meses[hm-1]} ${hy}.`;
+}
+
+async function guardarPagoHistorico() {
+  const aviso   = document.getElementById('ph-aviso');
+  const importe = parseFloat(document.getElementById('ph-importe').value);
+  const fecha   = document.getElementById('ph-fecha').value;
+  aviso.style.display = 'none';
+
+  if (!fecha) {
+    aviso.className = 'alert alert-danger';
+    aviso.textContent = 'La fecha es obligatoria';
+    aviso.style.display = 'block'; return;
+  }
+  if (!importe || importe <= 0) {
+    aviso.className = 'alert alert-danger';
+    aviso.textContent = 'El importe debe ser mayor a cero';
+    aviso.style.display = 'block'; return;
+  }
+
+  let periodos = [];
+
+  if (modoPagoHistorico === 'uno') {
+    const per = document.getElementById('ph-periodo').value.trim();
+    if (!per.match(/^\d{4}-\d{2}$/)) {
+      aviso.className = 'alert alert-danger';
+      aviso.textContent = 'El período debe tener el formato YYYY-MM (ej: 2024-03)';
+      aviso.style.display = 'block'; return;
+    }
+    periodos = [per];
+  } else {
+    const desde = document.getElementById('ph-desde').value.trim();
+    const hasta = document.getElementById('ph-hasta').value.trim();
+    if (!desde.match(/^\d{4}-\d{2}$/) || !hasta.match(/^\d{4}-\d{2}$/)) {
+      aviso.className = 'alert alert-danger';
+      aviso.textContent = 'Los períodos deben tener el formato YYYY-MM';
+      aviso.style.display = 'block'; return;
+    }
+    if (desde > hasta) {
+      aviso.className = 'alert alert-danger';
+      aviso.textContent = 'El período "desde" no puede ser mayor al "hasta"';
+      aviso.style.display = 'block'; return;
+    }
+    // Generar lista de períodos
+    let [ay, am] = desde.split('-').map(Number);
+    const [hy, hm] = hasta.split('-').map(Number);
+    while ((ay * 12 + am) <= (hy * 12 + hm)) {
+      periodos.push(`${ay.toString().padStart(4,'0')}-${am.toString().padStart(2,'0')}`);
+      am++; if (am > 12) { am = 1; ay++; }
+    }
+    if (periodos.length > 60) {
+      aviso.className = 'alert alert-danger';
+      aviso.textContent = 'El rango no puede superar 60 períodos';
+      aviso.style.display = 'block'; return;
+    }
+  }
+
+  try {
+    const res = await apiFetch('/transacciones/pago-manual', {
+      method: 'POST',
+      body: JSON.stringify({
+        abastecedor_id: abastecedorId,
+        periodos,
+        importe,
+        fecha,
+        comprobante:  document.getElementById('ph-comprobante').value || null,
+        descripcion:  document.getElementById('ph-descripcion').value || null,
+      })
+    });
+    const periodosStr = res.periodos.join(', ');
+    showAlert(`Pago histórico registrado — $${res.importe.toLocaleString('es-AR')} — Períodos: ${periodosStr}`);
+    cerrarModalPagoHistorico();
+    await cargarFicha();
+    await cargarMovimientos();
+  } catch(e) {
+    aviso.className = 'alert alert-danger';
+    aviso.textContent = e.message;
+    aviso.style.display = 'block';
+  }
+}
+
+cargarFicha();
+cargarMovimientos();
+</script>
+{% endblock %}

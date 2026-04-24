@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}Categorías{% endblock %}
+{% block topbar_title %}Categorías{% endblock %}
+{% block topbar_actions %}
+  <button class="btn btn-primary" onclick="abrirModalNuevo()">+ Nueva categoría</button>
+{% endblock %}
+
+{% block content %}
+<div id="alert-global" class="alert" style="display:none"></div>
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Código</th><th>Nombre</th><th>Descripción</th><th style="text-align:center">Módulos</th><th style="text-align:center">Estado</th><th style="text-align:right">Acciones</th></tr></thead>
+      <tbody id="tabla-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-cat">
+  <div class="modal">
+    <div class="modal-title" id="modal-titulo">Nueva categoría</div>
+    <div class="form-grid">
+      <div class="form-grid form-grid-2">
+        <div class="field"><label>Código *</label><input id="f-codigo" maxlength="4" placeholder="Ej: E" style="text-transform:uppercase"></div>
+        <div class="field"><label>Módulos *</label><input type="number" id="f-modulos" min="0.5" step="0.5" placeholder="Ej: 2.5"></div>
+      </div>
+      <div class="field"><label>Nombre *</label><input id="f-nombre" placeholder="Ej: Especialidades frías"></div>
+      <div class="field"><label>Descripción / rubros</label><textarea id="f-desc" placeholder="Rubros incluidos en esta categoría..."></textarea></div>
+      <div class="field"><label>Estado</label>
+        <select id="f-estado"><option value="activo">Activo</option><option value="baja">Baja</option></select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="cerrarModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="guardar()">Guardar</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let editandoId = null;
+
+async function cargar() {
+  const cats = await apiFetch('/categorias/');
+  const tbody = document.getElementById('tabla-body');
+  tbody.innerHTML = cats.map(c => `<tr>
+    <td><span class="badge badge-${c.codigo.toLowerCase()}">${c.codigo}</span></td>
+    <td style="font-weight:500">${c.nombre}</td>
+    <td style="color:#666;font-size:12px">${c.descripcion || '—'}</td>
+    <td style="text-align:center">${c.modulos} mód.</td>
+    <td style="text-align:center"><span class="badge badge-${c.estado}">${c.estado}</span></td>
+    <td style="text-align:right">
+      <button class="btn btn-sm" onclick="editar(${c.id})">Editar</button>
+      <button class="btn btn-sm btn-danger" onclick="eliminar(${c.id},'${c.nombre}')" style="margin-left:4px">Eliminar</button>
+    </td>
+  </tr>`).join('');
+}
+
+function abrirModalNuevo() {
+  editandoId = null;
+  document.getElementById('modal-titulo').textContent = 'Nueva categoría';
+  document.getElementById('f-codigo').value = '';
+  document.getElementById('f-codigo').disabled = false;
+  document.getElementById('f-nombre').value = '';
+  document.getElementById('f-modulos').value = '';
+  document.getElementById('f-desc').value = '';
+  document.getElementById('f-estado').value = 'activo';
+  document.getElementById('modal-cat').classList.add('open');
+}
+
+async function editar(id) {
+  editandoId = id;
+  const cat = await apiFetch(`/categorias/${id}`);
+  document.getElementById('modal-titulo').textContent = 'Editar categoría';
+  document.getElementById('f-codigo').value = cat.codigo;
+  document.getElementById('f-codigo').disabled = true;
+  document.getElementById('f-nombre').value = cat.nombre;
+  document.getElementById('f-modulos').value = cat.modulos;
+  document.getElementById('f-desc').value = cat.descripcion || '';
+  document.getElementById('f-estado').value = cat.estado;
+  document.getElementById('modal-cat').classList.add('open');
+}
+
+async function guardar() {
+  const datos = {
+    nombre:      document.getElementById('f-nombre').value.trim(),
+    modulos:     parseFloat(document.getElementById('f-modulos').value),
+    descripcion: document.getElementById('f-desc').value.trim() || null,
+    estado:      document.getElementById('f-estado').value,
+  };
+  if (!datos.nombre || isNaN(datos.modulos)) {
+    showAlert('Nombre y módulos son obligatorios', 'danger'); return;
+  }
+  try {
+    if (editandoId) {
+      await apiFetch(`/categorias/${editandoId}`, { method:'PUT', body: JSON.stringify(datos) });
+    } else {
+      const codigo = document.getElementById('f-codigo').value.trim().toUpperCase();
+      if (!codigo) { showAlert('El código es obligatorio', 'danger'); return; }
+      await apiFetch('/categorias/', { method:'POST', body: JSON.stringify({...datos, codigo}) });
+    }
+    showAlert('Guardado correctamente');
+    cerrarModal();
+    cargar();
+  } catch(e) { showAlert(e.message, 'danger'); }
+}
+
+async function eliminar(id, nombre) {
+  if (!confirm(`¿Eliminar la categoría "${nombre}"?`)) return;
+  try {
+    await apiFetch(`/categorias/${id}`, { method:'DELETE' });
+    showAlert('Categoría eliminada');
+    cargar();
+  } catch(e) { showAlert(e.message, 'danger'); }
+}
+
+function cerrarModal() { document.getElementById('modal-cat').classList.remove('open'); }
+cargar();
+</script>
+{% endblock %}

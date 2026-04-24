@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% block title %}Informe mensual{% endblock %}
+{% block topbar_title %}Informe mensual{% endblock %}
+{% block topbar_actions %}
+  <button class="btn btn-primary" onclick="generarCargos()">Generar cargos del mes</button>
+  <a id="btn-exportar" href="#" class="btn" onclick="exportarPDF(event)">Exportar PDF</a>
+  <button class="btn" onclick="window.print()">Imprimir</button>
+{% endblock %}
+
+{% block content %}
+<div id="alert-global" class="alert" style="display:none"></div>
+
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+  <label style="font-size:13px;color:#666">Período:</label>
+  <select id="sel-periodo" onchange="cargarInforme()" style="padding:7px 12px;border:1px solid #ddd;border-radius:7px;font-size:13px"></select>
+  <span style="font-size:12px;color:#aaa" id="lbl-modulo"></span>
+</div>
+
+<div class="metrics-grid" id="metrics-grid" style="margin-bottom:20px"></div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+
+  <div class="card">
+    <div class="card-header"><span class="card-title">Deudores del período</span></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Abastecedor</th><th>Teléfono</th><th style="text-align:center">Cat.</th><th style="text-align:right">Meses</th><th style="text-align:right">Deuda total</th></tr></thead>
+        <tbody id="tabla-deudores"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><span class="card-title">Resumen por categoría</span></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Categoría</th><th style="text-align:center">Mód.</th><th style="text-align:right">Abast.</th><th style="text-align:right">Facturado</th></tr></thead>
+        <tbody id="tabla-resumen"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<div class="card">
+  <div class="card-header"><span class="card-title">Todos los abastecedores — estado del período</span></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Razón social</th><th>Titular</th><th>Teléfono</th><th style="text-align:center">Cat.</th><th style="text-align:right">Meses adeudados</th><th style="text-align:right">Saldo</th></tr></thead>
+      <tbody id="tabla-todos"></tbody>
+    </table>
+  </div>
+</div>
+
+<style>
+@media print {
+  .sidebar, .topbar, .topbar-actions, #sel-periodo, #alert-global { display: none !important; }
+  .main { margin: 0; }
+  .content { padding: 0; }
+  .card { break-inside: avoid; }
+}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let parametro = null;
+
+function periodos(n = 12) {
+  const lista = [];
+  const hoy = new Date();
+  for (let i = 0; i < n; i++) {
+    const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
+    const val = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+    const label = d.toLocaleDateString('es-AR', { month:'long', year:'numeric' });
+    lista.push({ val, label });
+  }
+  return lista;
+}
+
+async function init() {
+  const ps = periodos(); // Esta función genera la lista de los últimos 12 meses
+  const sel = document.getElementById('sel-periodo');
+  
+  // Obtenemos el año y mes actual en formato "YYYY-MM"
+  const ahora = new Date();
+  const periodoActual = ahora.getFullYear() + '-' + String(ahora.getMonth() + 1).padStart(2, '0');
+
+  sel.innerHTML = ''; // Limpiamos por si acaso
+  
+  ps.forEach((p) => {
+    // Si el valor del período coincide con el actual, le ponemos 'selected'
+    const isSelected = p.val === periodoActual ? 'selected' : '';
+    sel.innerHTML += `<option value="${p.val}" ${isSelected}>${p.label}</option>`;
+  });
+
+  // El resto de tu código de carga...
+  const params = await apiFetch('/parametros/');
+  if (params && params.length) {
+    parametro = params.find(p => !p.vigencia_hasta) || params[0];
+    document.getElementById('lbl-modulo').textContent = `Valor módulo: $${parseFloat(parametro.valor_modulo).toLocaleString('es-AR')}`;
+  }
+  await cargarInforme();
+}
+
+function exportarPDF(e) {
+  e.preventDefault();
+  const periodo = document.getElementById('sel-periodo').value;
+  window.open(`/reportes/exportar-pdf/${periodo}`, '_blank');
+}
+
+async function cargarInforme() {
+  const periodo = document.getElementById('sel-periodo').value;
+  const [abastecedores, categorias] = await Promise.all([
+    apiFetch('/abastecedores/?estado=activo'),
+    apiFetch('/categorias/'),
+  ]);
+
+  let totalDeuda = 0, cantDeudores = 0, cantAlDia = 0;
+  const filas = [];
+
+  for (const ab of abastecedores) {
+    const det = await apiFetch(`/abastecedores/${ab.id}`);
+    
+    // FIX: Generamos los badges para múltiples categorías
+    const cats_html = (ab.categoria_ids || []).map(cid => {
+      const c = categorias.find(x => x.id === cid);
+      return c ? `<span class="badge badge-${c.codigo.toLowerCase()}">${c.codigo}</span>` : '';
+    }).join(' ');
+
+    const saldo = det.saldo || 0;
+    const meses = det.meses_adeudados || 0;
+    
+    if (saldo > 0) { cantDeudores++; totalDeuda += saldo; }
+    else cantAlDia++;
+
+    filas.push({ ...ab, cats_html, saldo, meses });
+  }
+
+  // Renderizado de métricas
+  document.getElementById('metrics-grid').innerHTML = `
+    <div class="metric-card"><div class="metric-label">Abastecedores activos</div><div class="metric-value">${abastecedores.length}</div></div>
+    <div class="metric-card"><div class="metric-label">Al día</div><div class="metric-value success">${cantAlDia}</div></div>
+    <div class="metric-card"><div class="metric-label">Con deuda</div><div class="metric-value ${cantDeudores>0?'danger':'success'}">${cantDeudores}</div></div>
+    <div class="metric-card"><div class="metric-label">Deuda total acumulada</div><div class="metric-value danger">$${totalDeuda.toLocaleString('es-AR')}</div></div>`;
+
+  // Tabla de Deudores
+  const deudores = filas.filter(f => f.saldo > 0).sort((a,b) => b.meses - a.meses);
+  document.getElementById('tabla-deudores').innerHTML = deudores.length
+    ? deudores.map(f => `<tr>
+        <td><a href="/abastecedores/${f.id}/detalle" style="color:inherit">${f.razon_social}</a></td>
+        <td style="color:#666">${f.telefono_principal || '—'}</td>
+        <td style="text-align:center">${f.cats_html}</td>
+        <td style="text-align:right"><span class="badge ${f.meses>=3?'badge-baja':'badge-deudor'}">${f.meses} ${f.meses===1?'mes':'meses'}</span></td>
+        <td style="text-align:right;color:#dc3545;font-weight:500">$${f.saldo.toLocaleString('es-AR')}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="5" style="text-align:center;color:#aaa;padding:16px">Sin deudores</td></tr>';
+
+  // Tabla de Resumen por categoría
+  const val_mod = parametro?.valor_modulo || 1000;
+  const resumen = categorias.map(cat => {
+    // Cuenta cuántos abastecedores tienen esta categoría en su lista
+    const abs = filas.filter(f => (f.categoria_ids || []).includes(cat.id));
+    const facturado = abs.length * parseFloat(cat.modulos) * val_mod;
+    return `<tr>
+      <td><span class="badge badge-${cat.codigo.toLowerCase()}">${cat.codigo}</span> ${cat.nombre}</td>
+      <td style="text-align:center">${cat.modulos}</td>
+      <td style="text-align:right">${abs.length}</td>
+      <td style="text-align:right">$${facturado.toLocaleString('es-AR')}</td>
+    </tr>`;
+  });
+  document.getElementById('tabla-resumen').innerHTML = resumen.join('');
+
+  // Tabla de Todos
+  document.getElementById('tabla-todos').innerHTML = filas
+    .sort((a,b) => b.saldo - a.saldo)
+    .map(f => `<tr>
+      <td><a href="/abastecedores/${f.id}/detalle" style="color:inherit">${f.razon_social}</a></td>
+      <td>${f.titular}</td>
+      <td>${f.telefono_principal || '—'}</td>
+      <td style="text-align:center">${f.cats_html}</td>
+      <td style="text-align:right">${f.meses > 0 ? `<span class="badge badge-deudor">${f.meses}</span>` : '<span class="badge badge-al-dia">0</span>'}</td>
+      <td style="text-align:right" class="${f.saldo>0?'saldo-deudor':'saldo-al-dia'}">$${f.saldo.toLocaleString('es-AR')}</td>
+    </tr>`).join('');
+}
+
+async function generarCargos() {
+  const periodo = document.getElementById('sel-periodo').value;
+  if (!confirm(`¿Generar cargos mensuales para todos los abastecedores activos del período ${periodo}?`)) return;
+  try {
+    const res = await apiFetch(`/transacciones/generar-cargos/${periodo}`, { method:'POST' });
+    showAlert(`Generados ${res.cargos_generados} cargos por $${res.total_facturado.toLocaleString('es-AR')}`);
+    await cargarInforme();
+  } catch(e) {
+    showAlert(e.message, 'danger');
+  }
+}
+
+init();
+</script>
+{% endblock %}

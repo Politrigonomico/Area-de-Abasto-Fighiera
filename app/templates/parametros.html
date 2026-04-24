@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}Valor del módulo{% endblock %}
+{% block topbar_title %}Valor del módulo{% endblock %}
+
+{% block content %}
+<div id="alert-global" class="alert" style="display:none"></div>
+
+<div style="display:grid;grid-template-columns:400px 1fr;gap:16px;align-items:start">
+
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Valor actual</span>
+    </div>
+    <div id="valor-actual" style="margin-bottom:20px">
+      <div style="font-size:13px;color:#888;margin-bottom:4px">Módulo vigente</div>
+      <div style="font-size:36px;font-weight:500;color:#1a1a1a" id="display-valor">Cargando...</div>
+      <div style="font-size:12px;color:#aaa;margin-top:4px" id="display-desde"></div>
+    </div>
+
+    <div style="border-top:1px solid #f0f0ec;padding-top:16px">
+      <div style="font-size:13px;font-weight:500;margin-bottom:12px">Actualizar valor</div>
+      <div class="form-grid">
+        <div class="field">
+          <label>Nuevo valor del módulo *</label>
+          <input type="number" id="nuevo-valor" placeholder="Ej: 1500" min="1" step="0.01">
+        </div>
+        <div class="field">
+          <label>Motivo del cambio</label>
+          <input id="nuevo-motivo" placeholder="Ej: Actualización por inflación marzo 2026">
+        </div>
+      </div>
+
+      <div style="background:#fff7e6;border:1px solid #ffc107;border-radius:7px;padding:10px 14px;font-size:13px;color:#856404;margin:12px 0" id="preview-impacto" style="display:none"></div>
+
+      <button class="btn btn-primary" style="margin-top:4px;width:100%" onclick="actualizarModulo()">
+        Confirmar actualización
+      </button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Historial de cambios</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+          <thead>
+            <tr>
+              <th>Valor</th>
+              <th>Vigente desde</th>
+              <th>Vigente hasta</th>
+              <th>Motivo</th>
+              <th style="text-align:center">Estado</th>
+              <th style="text-align:center">Eliminar</th>
+            </tr>
+          </thead>
+        <tbody id="tabla-historial"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let parametros = [];
+
+function fmtFecha(f) {
+  if (!f) return '—';
+  return new Date(f).toLocaleDateString('es-AR');
+}
+
+async function cargar() {
+  parametros = await apiFetch('/parametros/');
+  const actual = parametros.find(p => !p.vigencia_hasta) || parametros[0];
+
+  if (actual) {
+    document.getElementById('display-valor').textContent =
+      '$' + parseFloat(actual.valor_modulo).toLocaleString('es-AR');
+    document.getElementById('display-desde').textContent =
+      'Vigente desde: ' + fmtFecha(actual.vigencia_desde);
+  }
+
+  document.getElementById('tabla-historial').innerHTML = parametros.map(p => `
+    <tr>
+      <td style="font-weight:500;font-size:16px">$${parseFloat(p.valor_modulo).toLocaleString('es-AR')}</td>
+      <td>${fmtFecha(p.vigencia_desde)}</td>
+      <td>${p.vigencia_hasta ? fmtFecha(p.vigencia_hasta) : '—'}</td>
+      <td style="color:#666">${p.motivo || '—'}</td>
+      <td style="text-align:center">
+        <span class="badge ${!p.vigencia_hasta ? 'badge-activo' : 'badge-gray'}" style="background:${!p.vigencia_hasta?'#e8f5e9':'#f0f0ec'};color:${!p.vigencia_hasta?'#1e8449':'#888'}">
+          ${!p.vigencia_hasta ? 'vigente' : 'histórico'}
+        </span>
+      </td>
+      <td style="text-align:center">
+        ${p.vigencia_hasta ? `
+          <button onclick="eliminarParametro(${p.id}, '${fmtFecha(p.vigencia_desde)}')"
+            style="background:transparent;border:none;cursor:pointer;color:#dc3545;font-size:15px;padding:2px 6px"
+            title="Eliminar este registro">✕</button>
+        ` : '<span style="color:#ccc;font-size:13px">—</span>'}
+      </td>
+    </tr>`).join('');
+}
+
+document.getElementById('nuevo-valor').addEventListener('input', function() {
+  const nuevo = parseFloat(this.value);
+  const actual = parametros.find(p => !p.vigencia_hasta);
+  const preview = document.getElementById('preview-impacto');
+  if (nuevo > 0 && actual) {
+    const anterior = parseFloat(actual.valor_modulo);
+    const diff = ((nuevo - anterior) / anterior * 100).toFixed(1);
+    const signo = diff > 0 ? '+' : '';
+    preview.style.display = 'block';
+    preview.innerHTML = `El valor pasará de <strong>$${anterior.toLocaleString('es-AR')}</strong> a <strong>$${nuevo.toLocaleString('es-AR')}</strong> (${signo}${diff}%). Los cargos futuros usarán el nuevo valor. Los recibos ya emitidos no se modifican.`;
+  } else {
+    preview.style.display = 'none';
+  }
+});
+
+async function actualizarModulo() {
+  const valor  = parseFloat(document.getElementById('nuevo-valor').value);
+  const motivo = document.getElementById('nuevo-motivo').value.trim();
+  if (!valor || valor <= 0) {
+    showAlert('Ingresá un valor válido', 'danger'); return;
+  }
+  const actual = parametros.find(p => !p.vigencia_hasta);
+  if (actual && valor === parseFloat(actual.valor_modulo)) {
+    showAlert('El valor ingresado es igual al actual', 'danger'); return;
+  }
+  if (!confirm(`¿Confirmar cambio del módulo a $${valor.toLocaleString('es-AR')}?`)) return;
+
+  try {
+    await apiFetch('/parametros/', {
+      method: 'POST',
+      body: JSON.stringify({ valor_modulo: valor, motivo: motivo })
+    });
+    showAlert('Valor del módulo actualizado correctamente');
+    document.getElementById('nuevo-valor').value = '';
+    document.getElementById('nuevo-motivo').value = '';
+    document.getElementById('preview-impacto').style.display = 'none';
+    await cargar();
+  } catch(e) {
+    showAlert(e.message, 'danger');
+  }
+}
+async function eliminarParametro(id, fecha) {
+  if (!confirm(`¿Eliminar el registro del módulo vigente desde ${fecha}?\n\nEsta acción no afecta los cargos ya generados con ese valor.`)) return;
+  try {
+    await apiFetch(`/parametros/${id}`, { method: 'DELETE' });
+    showAlert('Registro eliminado correctamente');
+    await cargar();
+  } catch(e) {
+    showAlert(e.message, 'danger');
+  }
+}
+cargar();
+</script>
+{% endblock %}
