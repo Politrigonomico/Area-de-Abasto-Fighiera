@@ -10,6 +10,9 @@ Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
+; --- AGREGAMOS ESTO ---
+SetupIconFile=logo.ico
+UninstallDisplayIcon={app}\SistemaAbasto.exe
 
 [Languages]
 Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
@@ -28,6 +31,9 @@ Name: "{commondesktop}\Sistema de Abasto"; Filename: "{app}\SistemaAbasto.exe"; 
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "SistemaAbasto"; ValueData: """{app}\SistemaAbasto.exe"""; Flags: uninsdeletevalue; Tasks: startupicon
+
+; --- AGREGAMOS ESTA LÍNEA PARA EL PERMISO DE ADMIN ---
+Root: HKCU; Subkey: "Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers"; ValueType: string; ValueName: "{app}\SistemaAbasto.exe"; ValueData: "~ RUNASADMIN"; Flags: uninsdeletevalue
 
 [Run]
 Filename: "{app}\SistemaAbasto.exe"; Description: "Iniciar Sistema de Abasto ahora"; Flags: nowait postinstall skipifsilent

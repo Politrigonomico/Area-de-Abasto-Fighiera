@@ -2,7 +2,7 @@ import os
 import sys
 from io import BytesIO
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -20,10 +20,8 @@ AZUL_LINEA  = colors.HexColor('#3a6fd8')
 GRIS_BORDE  = colors.HexColor('#7a9ac0')
 NEGRO       = colors.black
 
-
 def _numero_formateado(n: int) -> str:
     return str(n).zfill(6)
-
 
 def _ruta_logo() -> str:
     if getattr(sys, 'frozen', False):
@@ -37,10 +35,32 @@ def _ruta_logo() -> str:
             return p
     return ''
 
+def _numero_recibo_vigente(db: Session, pago) -> int:
+    from app.models.numero_recibo import NumeroRecibo
 
-def _numero_recibo_vigente(db: Session) -> int:
-    return 0
+    # 1. Si el pago ya tiene un recibo asignado Y ES MAYOR A CERO, devolvemos ese mismo número
+    if pago.comprobante and pago.comprobante.isdigit() and int(pago.comprobante) > 0:
+        return int(pago.comprobante)
 
+    # 2. Si no tiene número (o si quedó trabado en 000000), buscamos el contador en la DB
+    contador = db.query(NumeroRecibo).filter(NumeroRecibo.id == 1).first()
+
+    # Si la tabla está vacía, creamos el registro inicial
+    if not contador:
+        contador = NumeroRecibo(id=1, ultimo=0)
+        db.add(contador)
+        db.flush()
+
+    # 3. Sumamos 1 al último número emitido
+    contador.ultimo += 1
+
+    # 4. Guardamos el nuevo número en el pago para futuras reimpresiones
+    pago.comprobante = str(contador.ultimo).zfill(6)
+    
+    # Guardamos los cambios
+    db.commit()
+
+    return contador.ultimo
 
 def _numero_a_letras(monto: float) -> str:
     entero   = int(monto)
@@ -76,8 +96,7 @@ def _numero_a_letras(monto: float) -> str:
         p = 'UN MILLON' if mn == 1 else _seg(mn) + ' MILLONES'
         texto = p + (' ' + _seg(r) if r else '')
 
-    return texto + (f' CON {centavos:02d}/100' if centavos else ' CON 00/100')
-
+    return texto + (f' CON {centavos:02d}' if centavos else ' CON 00')
 
 def _dibujar_recibo(c: canvas.Canvas, x0: float, y0: float,
                     ancho: float, alto: float,
@@ -87,12 +106,12 @@ def _dibujar_recibo(c: canvas.Canvas, x0: float, y0: float,
     xi = x0 + margen
     xa = x0 + ancho - margen
 
-    # Borde exterior principal
+    # Borde exterior
     c.setStrokeColor(GRIS_BORDE)
     c.setLineWidth(0.8)
     c.rect(x0, y0, ancho, alto)
 
-    # ================= ENCABEZADO =================
+    # ENCABEZADO
     enc_h = 22 * mm
     enc_y = y0 + alto - enc_h
     c.setFillColor(colors.HexColor('#e8f0fb'))
@@ -105,23 +124,23 @@ def _dibujar_recibo(c: canvas.Canvas, x0: float, y0: float,
         except Exception:
             pass
 
-    c.setFont('Helvetica', 7)
+    c.setFont('Helvetica', 7.5) # Letra un poco más grande
     c.setFillColor(NEGRO)
+    
+    # DATOS ACTUALIZADOS
     inst = [
-        'Andrade N 625 - S2126 AFG  Fighiera',
-        'Tel. (03402) 470124 - Fax: 03402-470259',
+        'San Martín 1075 - S2126 AFG Fighiera',
+        'Tel. 3402533508',
         'Provincia de Santa Fe',
-        'E-mail: comunafighiera@gmail.com',
-        'secretariacomuna@gmail.com',
+        'E-mail: areaabastofighiera@hotmail.com',
     ]
-    ty = enc_y + enc_h - 4 * mm
+    ty = enc_y + enc_h - 4.5 * mm
     for linea in inst:
         c.drawString(xi + 22 * mm, ty, linea)
-        ty -= 3.5 * mm
+        ty -= 3.8 * mm
 
     cx = x0 + ancho * 0.55
     c.setStrokeColor(GRIS_BORDE)
-    c.setLineWidth(0.5)
     c.line(cx, enc_y + 2 * mm, cx, enc_y + enc_h - 2 * mm)
 
     numero = _numero_formateado(datos['numero'])
@@ -136,12 +155,10 @@ def _dibujar_recibo(c: canvas.Canvas, x0: float, y0: float,
     c.drawRightString(xa, enc_y + 2 * mm, etiqueta)
 
     c.setStrokeColor(AZUL_LINEA)
-    c.setLineWidth(0.6)
     c.line(x0, enc_y, x0 + ancho, enc_y)
 
-
-    # ================= CUERPO (Letras grandes y alineadas) =================
-    FS = 10
+    # CUERPO
+    FS = 10.5 # Fuente más legible
     c.setFont('Helvetica', FS)
     c.setFillColor(NEGRO)
 
@@ -152,82 +169,67 @@ def _dibujar_recibo(c: canvas.Canvas, x0: float, y0: float,
         c.line(desde, y, hasta, y)
         c.setDash([])
 
-    # 1. Señor
-    cy = enc_y - 8 * mm
+    cy = enc_y - 9 * mm
     c.drawString(xi, cy, 'El Señor:')
     c.drawString(xi + 18 * mm, cy, datos['razon_social'][:60])
     linea_punteada(cy, xi + 16 * mm)
 
-    # 2. Calle
-    cy = enc_y - 16 * mm
+    cy = enc_y - 17 * mm
     c.drawString(xi, cy, 'en calle')
     c.drawString(xi + 16 * mm, cy, datos.get('domicilio', '')[:40])
     c.drawRightString(xa, cy, 'Ha satisfecho la')
-    linea_punteada(cy, xi + 14 * mm, xa - 28 * mm)
+    linea_punteada(cy, xi + 14 * mm, xa - 30 * mm)
 
-    # 3. Suma
-    cy = enc_y - 24 * mm
+    cy = enc_y - 25 * mm
     en_letras = _numero_a_letras(datos['total'])
     c.drawString(xi, cy, 'suma de Pesos')
     c.drawString(xi + 28 * mm, cy, en_letras[:70])
     linea_punteada(cy, xi + 26 * mm)
 
-    # 4. Concepto
-    cy = enc_y - 32 * mm
+    cy = enc_y - 33 * mm
     c.drawString(xi, cy, 'Por concepto de')
-    c.drawString(xi + 30 * mm, cy, datos.get('concepto', '')[:55])
+    c.drawString(xi + 30 * mm, cy, datos.get('concept', '')[:55])
     linea_punteada(cy, xi + 28 * mm)
 
-    # 5. Períodos
-    cy = enc_y - 40 * mm
+    cy = enc_y - 41 * mm
     c.drawString(xi, cy, datos.get('periodos_str', '')[:78])
-    linea_punteada(cy, xi + c.stringWidth("Periodos: ", 'Helvetica', FS))
+    linea_punteada(cy, xi + 15 * mm)
 
-
-    # ================= PIE (Caja $ y Firmas ancladas abajo) =================
-    # Caja Monto
-    caja_y = y0 + 12 * mm
+    # PIE (Caja y Firmas)
+    caja_y = y0 + 13 * mm
     caja_h = 12 * mm
-    caja_w = 45 * mm
+    caja_w = 48 * mm
     c.setStrokeColor(GRIS_BORDE)
     c.setDash([])
-    c.setLineWidth(0.8)
     c.rect(xi, caja_y, caja_w, caja_h)
     
     c.setFont('Helvetica', 8)
     c.setFillColor(AZUL_TITULO)
     c.drawString(xi + 2 * mm, caja_y + caja_h - 3 * mm, 'SON $')
     
-    c.setFont('Helvetica-Bold', 12)
+    c.setFont('Helvetica-Bold', 13)
     c.setFillColor(NEGRO)
     monto_str = '{:,.2f}'.format(datos['total']).replace(',', 'X').replace('.', ',').replace('X', '.')
-    c.drawCentredString(xi + caja_w / 2, caja_y + 3 * mm, '$ ' + monto_str)
+    c.drawCentredString(xi + caja_w / 2, caja_y + 3.5 * mm, '$ ' + monto_str)
 
-    # Firmas
-    firma_y = y0 + 15 * mm
-    c.setStrokeColor(NEGRO)
-    c.setLineWidth(0.5)
-
+    firma_y = y0 + 16 * mm
     cx_sello = x0 + ancho * 0.55
     c.line(cx_sello - 15 * mm, firma_y, cx_sello + 15 * mm, firma_y)
     c.setFont('Helvetica', 8)
-    c.drawCentredString(cx_sello, firma_y - 3 * mm, 'Sello')
+    c.drawCentredString(cx_sello, firma_y - 3.5 * mm, 'Sello')
 
     cx_firma = x0 + ancho * 0.85
     c.line(cx_firma - 15 * mm, firma_y, cx_firma + 15 * mm, firma_y)
-    c.drawCentredString(cx_firma, firma_y - 3 * mm, 'Firma')
+    c.drawCentredString(cx_firma, firma_y - 3.5 * mm, 'Firma')
 
-    # Fecha de emisión
     c.setFont('Helvetica', 9)
-    c.drawString(xi, y0 + 4 * mm, 'Recibido en Fighiera, el    ' + datos.get('fecha_str', ''))
-
+    c.drawString(xi, y0 + 5 * mm, 'Recibido en Fighiera, el    ' + datos.get('fecha_str', ''))
 
 @router.get("/triplicado/{pago_id}")
 def recibo_triplicado(pago_id: int, db: Session = Depends(get_db)):
     from app.models.transaccion  import Transaccion
     from app.models.abastecedor  import Abastecedor
     from app.models.pago_detalle import PagoDetalle
-    from fastapi import HTTPException
 
     pago = db.get(Transaccion, pago_id)
     if not pago or pago.tipo != 'pago':
@@ -235,29 +237,21 @@ def recibo_triplicado(pago_id: int, db: Session = Depends(get_db)):
 
     ab       = db.get(Abastecedor, pago.abastecedor_id)
     detalles = db.query(PagoDetalle).filter_by(pago_id=pago_id).all()
-    cargos   = [db.get(Transaccion, d.cargo_id) for d in detalles
-                if db.get(Transaccion, d.cargo_id)]
+    cargos   = [db.get(Transaccion, d.cargo_id) for d in detalles if db.get(Transaccion, d.cargo_id)]
 
     periodos_sorted = sorted(set(c.periodo for c in cargos if c.periodo))
-    if periodos_sorted:
-        periodos_str = 'Periodos: ' + ', '.join(periodos_sorted)
-        concepto     = 'Cuota Abasto - ' + str(len(periodos_sorted)) + ' periodo(s)'
-    else:
-        periodos_str = ''
-        concepto     = pago.descripcion or 'Pago Abasto'
+    periodos_str = 'Periodos: ' + ', '.join(periodos_sorted) if periodos_sorted else ''
+    concepto     = f'Cuota Abasto - {len(periodos_sorted)} periodo(s)' if periodos_sorted else (pago.descripcion or 'Pago Abasto')
 
-    numero    = _numero_recibo_vigente(db)
-    fecha_obj = pago.fecha
     meses_es  = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
                  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
-    fecha_str = (str(fecha_obj.day) + ' de ' + meses_es[fecha_obj.month - 1] +
-                 ' de ' + str(fecha_obj.year))
+    fecha_str = f"{pago.fecha.day} de {meses_es[pago.fecha.month - 1]} de {pago.fecha.year}"
 
     datos = {
-        'numero':       numero,
-        'razon_social': ab.razon_social + '  -  Tit: ' + ab.titular,
+        'numero':       _numero_recibo_vigente(db, pago),
+        'razon_social': f"{ab.razon_social}  -  Tit: {ab.titular}",
         'domicilio':    ab.domicilio or '',
-        'concepto':     concepto,
+        'concept':      concepto,
         'periodos_str': periodos_str,
         'total':        float(pago.importe),
         'fecha_str':    fecha_str,
@@ -266,34 +260,28 @@ def recibo_triplicado(pago_id: int, db: Session = Depends(get_db)):
     logo_path = _ruta_logo()
     buffer    = BytesIO()
     W, H      = A4
-
     c = canvas.Canvas(buffer, pagesize=A4)
-    c.setTitle('Recibo Abasto N ' + _numero_formateado(numero))
 
-    franja_h   = H / 3
-    margen_ext = 8 * mm
-    recibo_w   = W - 2 * margen_ext
+    # AJUSTE DE MÁRGENES PARA EVITAR RECORTE SUPERIOR
+    margen_superior = 12 * mm 
+    margen_inferior = 8 * mm
+    espacio_util    = H - margen_superior - margen_inferior
+    franja_h        = espacio_util / 3
+    margen_ext      = 8 * mm
+    recibo_w        = W - 2 * margen_ext
 
     for i, etiqueta in enumerate(['ORIGINAL', 'DUPLICADO', 'TRIPLICADO']):
-        y_base = H - (i + 1) * franja_h
+        # Se calcula la posición Y empezando más abajo del borde de la hoja
+        y_base = H - margen_superior - (i + 1) * franja_h
         alto   = franja_h - 2 * mm
-        _dibujar_recibo(c, margen_ext, y_base + 1 * mm, recibo_w, alto,
-                        datos, etiqueta, logo_path)
+        _dibujar_recibo(c, margen_ext, y_base + 1 * mm, recibo_w, alto, datos, etiqueta, logo_path)
         
-        # Linea de corte entre recibos
         if i < 2:
             c.setStrokeColor(colors.HexColor('#bbbbbb'))
-            c.setLineWidth(0.4)
             c.setDash([4, 5])
-            c.line(0, y_base + 0.5 * mm, W, y_base + 0.5 * mm)
+            c.line(0, y_base, W, y_base)
             c.setDash([])
 
     c.save()
     buffer.seek(0)
-
-    filename = 'recibo-abasto-' + _numero_formateado(numero) + '-pago' + str(pago_id) + '.pdf'
-    return StreamingResponse(
-        buffer,
-        media_type='application/pdf',
-        headers={'Content-Disposition': 'inline; filename=' + filename}
-    )
+    return StreamingResponse(buffer, media_type='application/pdf')

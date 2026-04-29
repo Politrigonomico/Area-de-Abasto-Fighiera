@@ -88,10 +88,11 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,
+    console=False, # Esto evita que se abra la ventana negra de consola
     disable_windowed_traceback=False,
+    argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,
+    icon=['logo.ico'], # <--- AGREGÁ ESTA LÍNEA AQUÍ
 )

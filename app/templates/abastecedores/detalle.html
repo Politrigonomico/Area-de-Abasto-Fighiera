@@ -251,12 +251,24 @@ let modoCargoActual = 'una';
 let tabActual = 'deudas';
 let modoPagoHistorico = 'uno';
 
+function deseleccionarTodo() {
+  // Desmarcamos todos los tildes
+  document.querySelectorAll('.check-cargo').forEach(c => c.checked = false);
+  // Ocultamos el panel directamente a la fuerza
+  const panel = document.getElementById('panel-pago');
+  if (panel) panel.style.display = 'none';
+}
+
 function setTab(tab) {
   tabActual = tab;
+  
+  deseleccionarTodo();
+
   document.getElementById('tab-deudas').style.background  = tab === 'deudas'  ? '#1a1a2e' : '#fff';
   document.getElementById('tab-deudas').style.color       = tab === 'deudas'  ? '#fff'    : '#333';
   document.getElementById('tab-pagos').style.background   = tab === 'pagos'   ? '#1a1a2e' : '#fff';
   document.getElementById('tab-pagos').style.color        = tab === 'pagos'   ? '#fff'    : '#333';
+  
   renderTabla();
 }
 
@@ -385,13 +397,17 @@ async function cargarMovimientos() {
 }
 
 function renderTabla() {
+  // 1. APAGADO DE EMERGENCIA: Cada vez que la tabla cambia (por pestaña o por filtro de año), ocultamos el panel y limpiamos la memoria
+  document.getElementById('panel-pago').style.display = 'none';
+  proximoReciboCache = null;
+
   const filtroAnio = document.getElementById('filtro-anio').value;
   const filtrados = filtroAnio ? cargosData.filter(m => m.periodo?.startsWith(filtroAnio)) : cargosData;
   const tbody = document.getElementById('tabla-cc');
   const thead = document.querySelector('table thead tr');
 
   if (tabActual === 'deudas') {
-    // 1. Ajustamos el encabezado para Deudas (6 columnas reales)
+    // Ajustamos el encabezado para Deudas
     thead.innerHTML = `
       <th style="width:40px"></th>
       <th>Período</th>
@@ -424,7 +440,7 @@ function renderTabla() {
       </tr>`).join('');
 
   } else {
-    // 2. Ajustamos el encabezado para Pagos (5 columnas reales)
+    // Ajustamos el encabezado para Pagos
     thead.innerHTML = `
       <th>Fecha / Período</th>
       <th>Concepto / Recibo</th>
@@ -492,33 +508,56 @@ function toggleCheck(row) {
   if (cb) { cb.checked = !cb.checked; actualizarPanel(); }
 }
 
-function actualizarPanel() {
+// 1. Declaramos la variable global al principio del script
+let proximoReciboCache = null;
+
+// 2. Función actualizarPanel (ahora es async para poder esperar al servidor)
+async function actualizarPanel() {
   const checks   = document.querySelectorAll('.check-cargo:checked');
   const total    = Array.from(checks).reduce((s,c) => s + parseFloat(c.dataset.importe), 0);
   const periodos = Array.from(checks).map(c => c.dataset.periodo).sort();
   const panel    = document.getElementById('panel-pago');
-  if (checks.length === 0) { panel.style.display = 'none'; return; }
+  
+  if (checks.length === 0) { 
+      panel.style.display = 'none'; 
+      return; 
+  }
+  
   panel.style.display = 'block';
   document.getElementById('panel-total').textContent    = '$' + total.toLocaleString('es-AR');
   document.getElementById('panel-periodos').textContent = periodos.join(', ');
-  // Autocompleta el N° recibo con 000000 si está vacío
-  const campoCbte = document.getElementById('p-comprobante');
-  if (!campoCbte.value) campoCbte.value = '000000';
-}
 
-function deseleccionarTodo() {
-  document.querySelectorAll('.check-cargo').forEach(c => c.checked = false);
-  actualizarPanel();
+  const inputComprobante = document.getElementById('p-comprobante');
+  
+  // Pedimos el próximo número al servidor solo si no lo tenemos guardado
+  if (!proximoReciboCache) {
+      try {
+          const res = await apiFetch('/transacciones/proximo-recibo');
+          if (res && res.proximo) {
+              proximoReciboCache = res.proximo;
+          }
+      } catch (e) {
+          console.error("Error al obtener el próximo recibo:", e);
+      }
+  }
+  
+  // Insertamos estrictamente el número de texto, evitando el [object HTMLInputElement]
+  if (inputComprobante && proximoReciboCache) {
+      inputComprobante.value = proximoReciboCache;
+  }
 }
 
 async function confirmarPago() {
   const checks   = document.querySelectorAll('.check-cargo:checked');
   const cargoIds = Array.from(checks).map(c => parseInt(c.value));
   const fecha    = document.getElementById('p-fecha').value;
+  
   if (!cargoIds.length) { showAlert('Seleccioná al menos un período', 'danger'); return; }
   if (!fecha)           { showAlert('La fecha es obligatoria', 'danger'); return; }
+  
   const periodos = Array.from(checks).map(c => c.dataset.periodo).sort();
   if (!confirm(`¿Confirmar pago de los períodos ${periodos.join(', ')}?`)) return;
+  
   try {
     const res = await apiFetch('/transacciones/pago-selectivo', {
       method: 'POST',
@@ -529,11 +568,21 @@ async function confirmarPago() {
         comprobante:    document.getElementById('p-comprobante').value || null,
       })
     });
-    showAlert(`✓ Pago registrado — $${res.importe.toLocaleString('es-AR')} — Períodos: ${res.periodos.join(', ')}`);
+
+    // Mostramos la alerta con el número real y abrimos el PDF
+    showAlert(`✓ Pago registrado — Recibo #${res.comprobante} — $${res.importe.toLocaleString('es-AR')}`);
     window.open(`/recibo-pdf/triplicado/${res.pago_id}`, '_blank');
+    
     document.getElementById('panel-pago').style.display = 'none';
+    deseleccionarTodo();
+    
+    // Limpiamos la caché y la caja de texto para el siguiente pago
+    proximoReciboCache = null; 
+    document.getElementById('p-comprobante').value = ''; 
+    
     await cargarFicha();
     await cargarMovimientos();
+    
   } catch(e) {
     showAlert(e.message, 'danger');
   }

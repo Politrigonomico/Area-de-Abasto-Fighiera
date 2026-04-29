@@ -70,6 +70,7 @@ def pago_selectivo(data: PagoSelectivo, db: Session = Depends(get_db)):
 @router.post("/pago-manual")
 def pago_manual(data: PagoManual, db: Session = Depends(get_db)):
     from app.services.cobro_service import get_parametro_vigente
+    from app.models.numero_recibo import NumeroRecibo
 
     ab = db.get(Abastecedor, data.abastecedor_id)
     if not ab:
@@ -78,6 +79,20 @@ def pago_manual(data: PagoManual, db: Session = Depends(get_db)):
         raise HTTPException(400, "Ingresá al menos un período")
     if data.importe <= 0:
         raise HTTPException(400, "El importe debe ser mayor a cero")
+
+    # ================= LÓGICA DE AUTONUMERACIÓN =================
+    if not data.comprobante:
+        contador = db.query(NumeroRecibo).filter(NumeroRecibo.id == 1).first()
+        if not contador:
+            contador = NumeroRecibo(id=1, ultimo=1499)
+            db.add(contador)
+            db.flush()
+        
+        contador.ultimo += 1
+        numero_final = str(contador.ultimo).zfill(6)
+    else:
+        numero_final = data.comprobante
+    # ============================================================
 
     parametro    = get_parametro_vigente(db, data.fecha)
     periodos_str = ", ".join(sorted(data.periodos))
@@ -92,7 +107,7 @@ def pago_manual(data: PagoManual, db: Session = Depends(get_db)):
         valor_modulo_snapshot = float(parametro.valor_modulo),
         importe               = data.importe,
         fecha                 = data.fecha,
-        comprobante           = data.comprobante,
+        comprobante           = numero_final,
         descripcion           = desc,
         usuario               = "historico",
     )
@@ -216,6 +231,22 @@ def cargos_pendientes(abastecedor_id: int, db: Session = Depends(get_db)):
     return [{"id": c.id, "periodo": c.periodo, "importe": float(c.importe),
              "descripcion": c.descripcion} for c in cargos]
 
+
+@router.get("/proximo-recibo")
+def proximo_recibo(db: Session = Depends(get_db)):
+    from app.models.numero_recibo import NumeroRecibo
+    contador = db.query(NumeroRecibo).filter(NumeroRecibo.id == 1).first()
+    
+    # Si la base de datos está totalmente vacía (instalación nueva)
+    if not contador:
+        # Iniciamos el contador en 1499 (o el número que decidan usar menos 1)
+        contador = NumeroRecibo(id=1, ultimo=1499)
+        db.add(contador)
+        db.commit()
+        db.refresh(contador)
+        
+    return {"proximo": str(contador.ultimo + 1).zfill(6)}
+
 @router.get("/abastecedor/{id}")
 def movimientos_abastecedor(id: int, db: Session = Depends(get_db)):
     ab = db.get(Abastecedor, id)
@@ -259,11 +290,21 @@ def eliminar_cargo(cargo_id: int, db: Session = Depends(get_db)):
 @router.delete("/pago/{pago_id}")
 def eliminar_pago(pago_id: int, db: Session = Depends(get_db)):
     from app.models.pago_detalle import PagoDetalle
+    from app.models.numero_recibo import NumeroRecibo
+
     pago = db.get(Transaccion, pago_id)
     if not pago:
         raise HTTPException(404, "Pago no encontrado")
     if pago.tipo != 'pago':
         raise HTTPException(400, "Este registro no es un pago")
+
+    # ================= LÓGICA DE DEVOLUCIÓN DEL NÚMERO DE RECIBO =================
+    if pago.comprobante and pago.comprobante.isdigit():
+        num_pago = int(pago.comprobante)
+        contador = db.query(NumeroRecibo).filter(NumeroRecibo.id == 1).first()
+        if contador and contador.ultimo == num_pago:
+            contador.ultimo -= 1
+    # =============================================================================
 
     detalles = db.query(PagoDetalle).filter_by(pago_id=pago_id).all()
 
