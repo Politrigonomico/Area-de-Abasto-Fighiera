@@ -3,7 +3,7 @@
 {% block topbar_title %}<span id="topbar-nombre">Cargando...</span>{% endblock %}
 {% block topbar_actions %}
   <a href="/abastecedores" class="btn">← Volver</a>
-  <button class="btn" onclick="abrirModalCargoManual()">+ Cargar deuda</button>
+  <button class="btn" onclick="abrirModalCargoManual()">+ Cargar / Adelantar períodos</button>
   <button class="btn" onclick="abrirModalPagoHistorico()">+ Cargar pago viejo</button>
 {% endblock %}
 
@@ -106,19 +106,17 @@
 <!-- Modal cargo de deudas -->
 <div class="modal-overlay" id="modal-cargo">
   <div class="modal" style="width:460px">
-    <div class="modal-title">Cargar deuda</div>
+    <div class="modal-title">Cargar / Adelantar períodos manuales</div>
 
     <!-- Selector de modo -->
-    <div style="display:flex;gap:8px;margin-bottom:20px">
-      <button id="btn-modo-una" onclick="setModo('una')"
-        style="flex:1;padding:10px;border-radius:8px;border:2px solid #6c63ff;background:#6c63ff;color:#fff;font-size:13px;cursor:pointer;font-weight:500">
-        Cargar una deuda
-      </button>
-      <button id="btn-modo-varias" onclick="setModo('varias')"
-        style="flex:1;padding:10px;border-radius:8px;border:2px solid #ddd;background:#fff;color:#333;font-size:13px;cursor:pointer">
-        Cargar varias deudas
-      </button>
-    </div>
+    <button id="btn-modo-una" onclick="setModo('una')"
+      style="flex:1;padding:10px;border-radius:8px;border:2px solid #6c63ff;background:#6c63ff;color:#fff;font-size:13px;cursor:pointer;font-weight:500">
+      Un solo período
+    </button>
+    <button id="btn-modo-varias" onclick="setModo('varias')"
+      style="flex:1;padding:10px;border-radius:8px;border:2px solid #ddd;background:#fff;color:#333;font-size:13px;cursor:pointer">
+      Varios períodos
+    </button>
 
     <!-- Modo: una deuda -->
     <div id="modo-una">
